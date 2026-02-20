@@ -1,0 +1,25 @@
+# Credenciales (NO subir a GitHub)
+service_account.json
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Debug scripts
+debug_*.py
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
