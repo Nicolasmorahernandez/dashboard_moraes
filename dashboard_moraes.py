@@ -14,9 +14,11 @@ Los valores monetarios vienen con formato "$1,234.56" y los porcentajes como "22
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import gspread
 from google.oauth2.service_account import Credentials
 import pathlib, re
+from datetime import datetime
 
 # ── Configuración de página ──────────────────────────────────────────────────
 st.set_page_config(
@@ -26,23 +28,402 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Estilos CSS personalizados ───────────────────────────────────────────────
-st.markdown("""
+# ══════════════════════════════════════════════════════════════════════════════
+# PALETA DE COLORES PERSONALIZADA
+# ══════════════════════════════════════════════════════════════════════════════
+COLORS = {
+    "primary": "#1e3a8a",       # Azul oscuro
+    "primary_light": "#3b82f6", # Azul medio
+    "secondary": "#10b981",     # Verde esmeralda
+    "secondary_light": "#34d399",# Verde claro
+    "accent": "#f59e0b",        # Naranja/ámbar
+    "accent_light": "#fbbf24",  # Ámbar claro
+    "negative": "#ef4444",      # Rojo
+    "negative_light": "#f87171",# Rojo claro
+    "bg_dark": "#0f172a",       # Slate muy oscuro
+    "bg_card": "#1e293b",       # Slate oscuro
+    "bg_card_hover": "#273548", # Slate medio para hover
+    "text": "#f1f5f9",          # Gris muy claro
+    "text_muted": "#94a3b8",    # Gris medio
+    "border": "#334155",        # Slate medio
+    "border_light": "#475569",  # Slate algo más claro
+    "gradient_start": "#1e3a8a",# Inicio gradiente
+    "gradient_end": "#7c3aed",  # Fin gradiente (violeta)
+}
+
+# Secuencias de colores para gráficos
+COLOR_SEQ_PRIMARY = [
+    COLORS["primary_light"], COLORS["secondary"], COLORS["accent"],
+    COLORS["negative"], "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16",
+]
+COLOR_SEQ_PASTEL = [
+    "#93c5fd", "#6ee7b7", "#fcd34d", "#fca5a5",
+    "#c4b5fd", "#67e8f9", "#f9a8d4", "#bef264",
+]
+COLOR_POS_NEG = [COLORS["secondary"], COLORS["negative"]]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ESTILOS CSS PERSONALIZADOS
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown(f"""
 <style>
-    [data-testid="stMetric"] {
-        background: rgba(30,30,40,0.6);
-        border: 1px solid rgba(100,100,120,0.3);
+    /* ── Animaciones ──────────────────────────────────────── */
+    @keyframes fadeInUp {{
+        from {{ opacity: 0; transform: translateY(20px); }}
+        to   {{ opacity: 1; transform: translateY(0); }}
+    }}
+    @keyframes shimmer {{
+        0%   {{ background-position: -200% 0; }}
+        100% {{ background-position: 200% 0; }}
+    }}
+    @keyframes pulse {{
+        0%, 100% {{ opacity: 1; }}
+        50%      {{ opacity: 0.7; }}
+    }}
+
+    /* ── Body / Fondo principal ───────────────────────────── */
+    .stApp {{
+        background: linear-gradient(135deg, {COLORS['bg_dark']} 0%, #0c1220 50%, #111827 100%);
+    }}
+
+    /* ── Header fijo superior ─────────────────────────────── */
+    .dashboard-header {{
+        background: linear-gradient(135deg, {COLORS['primary']} 0%, {COLORS['gradient_end']} 100%);
+        padding: 1.2rem 2rem;
+        border-radius: 0 0 16px 16px;
+        margin: -1rem -1rem 1.5rem -1rem;
+        box-shadow: 0 4px 20px rgba(30, 58, 138, 0.4);
+        animation: fadeInUp 0.6s ease-out;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }}
+    .dashboard-header h1 {{
+        color: white;
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin: 0;
+        letter-spacing: -0.02em;
+    }}
+    .dashboard-header .subtitle {{
+        color: rgba(255,255,255,0.75);
+        font-size: 0.85rem;
+        margin-top: 4px;
+    }}
+    .header-badge {{
+        background: rgba(255,255,255,0.15);
+        backdrop-filter: blur(10px);
+        padding: 6px 14px;
+        border-radius: 20px;
+        color: white;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }}
+
+    /* ── Tarjetas de métricas con gradientes ───────────────── */
+    [data-testid="stMetric"] {{
+        background: linear-gradient(145deg, {COLORS['bg_card']} 0%, rgba(30,41,59,0.7) 100%);
+        border: 1px solid {COLORS['border']};
+        border-radius: 14px;
+        padding: 18px 22px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        animation: fadeInUp 0.5s ease-out;
+    }}
+    [data-testid="stMetric"]:hover {{
+        transform: translateY(-3px);
+        box-shadow: 0 8px 30px rgba(30, 58, 138, 0.3), inset 0 1px 0 rgba(255,255,255,0.08);
+        border-color: {COLORS['primary_light']};
+    }}
+    [data-testid="stMetric"] label {{
+        font-size: 0.82rem;
+        color: {COLORS['text_muted']} !important;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }}
+    [data-testid="stMetric"] [data-testid="stMetricValue"] {{
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: {COLORS['text']} !important;
+    }}
+
+    /* ── Tabs con transiciones suaves ─────────────────────── */
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 4px;
+        background: {COLORS['bg_card']};
+        border-radius: 12px;
+        padding: 4px;
+        border: 1px solid {COLORS['border']};
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }}
+    .stTabs [data-baseweb="tab"] {{
+        padding: 10px 24px;
         border-radius: 10px;
-        padding: 12px 16px;
-    }
-    [data-testid="stMetric"] label { font-size: 0.85rem; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] {
-        padding: 8px 20px;
-        border-radius: 8px 8px 0 0;
-    }
+        font-weight: 500;
+        font-size: 0.85rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        color: {COLORS['text_muted']};
+        border: none;
+    }}
+    .stTabs [data-baseweb="tab"]:hover {{
+        background: rgba(59, 130, 246, 0.1);
+        color: {COLORS['text']};
+    }}
+    .stTabs [aria-selected="true"] {{
+        background: linear-gradient(135deg, {COLORS['primary']} 0%, {COLORS['gradient_end']} 100%) !important;
+        color: white !important;
+        box-shadow: 0 2px 10px rgba(30, 58, 138, 0.4);
+    }}
+
+    /* ── Selectbox y Multiselect ───────────────────────────── */
+    [data-baseweb="select"] {{
+        border-radius: 10px !important;
+    }}
+    [data-baseweb="select"] > div {{
+        background: {COLORS['bg_card']} !important;
+        border: 1px solid {COLORS['border']} !important;
+        border-radius: 10px !important;
+        transition: all 0.3s ease;
+    }}
+    [data-baseweb="select"] > div:hover {{
+        border-color: {COLORS['primary_light']} !important;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+    }}
+
+    /* ── DataFrames ────────────────────────────────────────── */
+    [data-testid="stDataFrame"] {{
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid {COLORS['border']};
+        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }}
+
+    /* ── Expander ──────────────────────────────────────────── */
+    [data-testid="stExpander"] {{
+        background: {COLORS['bg_card']};
+        border: 1px solid {COLORS['border']};
+        border-left: 3px solid {COLORS['accent']};
+        border-radius: 12px;
+        transition: all 0.3s ease;
+        margin-bottom: 8px;
+    }}
+    [data-testid="stExpander"]:hover {{
+        border-left-color: {COLORS['primary_light']};
+        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }}
+
+    /* ── Botones de descarga ───────────────────────────────── */
+    .stDownloadButton > button {{
+        background: linear-gradient(135deg, {COLORS['primary']} 0%, {COLORS['primary_light']} 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 10px 24px !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 2px 10px rgba(30, 58, 138, 0.3) !important;
+    }}
+    .stDownloadButton > button:hover {{
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(30, 58, 138, 0.5) !important;
+    }}
+
+    /* ── Botón de actualizar ───────────────────────────────── */
+    .stButton > button {{
+        background: linear-gradient(135deg, {COLORS['bg_card']} 0%, rgba(30,41,59,0.8) 100%) !important;
+        border: 1px solid {COLORS['border']} !important;
+        border-radius: 10px !important;
+        color: {COLORS['text']} !important;
+        transition: all 0.3s ease !important;
+        padding: 8px 20px !important;
+    }}
+    .stButton > button:hover {{
+        border-color: {COLORS['primary_light']} !important;
+        box-shadow: 0 0 15px rgba(59, 130, 246, 0.2) !important;
+        transform: translateY(-1px) !important;
+    }}
+
+    /* ── Separadores elegantes ─────────────────────────────── */
+    hr {{
+        border: none;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, {COLORS['border']}, transparent);
+        margin: 1.5rem 0;
+    }}
+
+    /* ── Alertas personalizadas ────────────────────────────── */
+    [data-testid="stAlert"] {{
+        border-radius: 12px;
+        border: none;
+    }}
+
+    /* ── Headers / Títulos ─────────────────────────────────── */
+    .section-title {{
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: {COLORS['text']};
+        padding-bottom: 8px;
+        margin-bottom: 16px;
+        border-bottom: 2px solid transparent;
+        border-image: linear-gradient(90deg, {COLORS['primary_light']}, {COLORS['gradient_end']}) 1;
+        animation: fadeInUp 0.5s ease-out;
+    }}
+    .section-subtitle {{
+        font-size: 0.9rem;
+        color: {COLORS['text_muted']};
+        margin-bottom: 12px;
+    }}
+
+    /* ── Text input (buscador) ─────────────────────────────── */
+    [data-testid="stTextInput"] input {{
+        background: {COLORS['bg_card']} !important;
+        border: 1px solid {COLORS['border']} !important;
+        border-radius: 10px !important;
+        color: {COLORS['text']} !important;
+        transition: all 0.3s ease;
+    }}
+    [data-testid="stTextInput"] input:focus {{
+        border-color: {COLORS['primary_light']} !important;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+    }}
+
+    /* ── Contenedor de contenido con fade-in ───────────────── */
+    .element-container {{
+        animation: fadeInUp 0.4s ease-out;
+    }}
+
+    /* ── Success / Error boxes ─────────────────────────────── */
+    .stSuccess {{
+        background: rgba(16, 185, 129, 0.1) !important;
+        border-left: 4px solid {COLORS['secondary']} !important;
+        border-radius: 10px !important;
+    }}
+    .stError {{
+        background: rgba(239, 68, 68, 0.1) !important;
+        border-left: 4px solid {COLORS['negative']} !important;
+        border-radius: 10px !important;
+    }}
+
+    /* ── Ocultar elementos por defecto de Streamlit ────────── */
+    #MainMenu {{ visibility: hidden; }}
+    footer {{ visibility: hidden; }}
+    header {{ visibility: hidden; }}
+
+    /* ── Footer personalizado ──────────────────────────────── */
+    .custom-footer {{
+        background: linear-gradient(135deg, {COLORS['bg_card']} 0%, rgba(15,23,42,0.9) 100%);
+        border-top: 1px solid {COLORS['border']};
+        border-radius: 16px 16px 0 0;
+        padding: 16px 24px;
+        margin-top: 2rem;
+        text-align: center;
+        color: {COLORS['text_muted']};
+        font-size: 0.8rem;
+    }}
+    .custom-footer a {{
+        color: {COLORS['primary_light']};
+        text-decoration: none;
+    }}
 </style>
 """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FUNCIONES DE DISEÑO (helpers visuales)
+# ══════════════════════════════════════════════════════════════════════════════
+def render_header():
+    """Renderiza el header principal del dashboard."""
+    now = datetime.now().strftime("%d/%m/%Y %H:%M")
+    st.markdown(f"""
+    <div class="dashboard-header">
+        <div>
+            <h1>📊 Dashboard MORAES</h1>
+            <div class="subtitle">Analítica financiera en tiempo real · Google Sheets</div>
+        </div>
+        <div class="header-badge">🕐 {now}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def section_title(icon: str, title: str, subtitle: str = ""):
+    """Renderiza un título de sección estilizado."""
+    sub_html = f'<div class="section-subtitle">{subtitle}</div>' if subtitle else ""
+    st.markdown(f"""
+    <div class="section-title">{icon} {title}</div>
+    {sub_html}
+    """, unsafe_allow_html=True)
+
+
+def styled_separator():
+    """Separador visual elegante."""
+    st.markdown("""
+    <div style="margin: 1.5rem 0; height: 1px;
+         background: linear-gradient(90deg, transparent, #334155, #3b82f6, #334155, transparent);">
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_footer():
+    """Renderiza el footer personalizado."""
+    now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    st.markdown(f"""
+    <div class="custom-footer">
+        <strong>Dashboard MORAES</strong> · Datos actualizados desde Google Sheets cada 60s<br/>
+        Última carga: {now} ·
+        <a href="https://github.com/Nicolasmorahernandez/dashboard_moraes" target="_blank">GitHub</a>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FUNCIONES DE GRÁFICOS (layout y tema consistente)
+# ══════════════════════════════════════════════════════════════════════════════
+def apply_chart_theme(fig, height: int = None):
+    """Aplica el tema visual consistente a cualquier gráfico Plotly."""
+    layout_args = dict(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(
+            family="Inter, -apple-system, sans-serif",
+            color=COLORS["text"],
+            size=12,
+        ),
+        xaxis=dict(
+            gridcolor="rgba(51,65,85,0.4)",
+            gridwidth=1,
+            zeroline=False,
+            showline=True,
+            linecolor=COLORS["border"],
+            linewidth=1,
+        ),
+        yaxis=dict(
+            gridcolor="rgba(51,65,85,0.4)",
+            gridwidth=1,
+            zeroline=False,
+            showline=True,
+            linecolor=COLORS["border"],
+            linewidth=1,
+        ),
+        margin=dict(t=30, b=40, l=60, r=20),
+        legend=dict(
+            bgcolor="rgba(0,0,0,0)",
+            bordercolor="rgba(0,0,0,0)",
+            font=dict(color=COLORS["text_muted"], size=11),
+        ),
+        hoverlabel=dict(
+            bgcolor=COLORS["bg_card"],
+            bordercolor=COLORS["border"],
+            font=dict(color=COLORS["text"], size=13),
+        ),
+    )
+    if height:
+        layout_args["height"] = height
+    fig.update_layout(**layout_args)
+    return fig
+
 
 # ── Constantes ───────────────────────────────────────────────────────────────
 SPREADSHEET_NAME = "Finanzas MORAES"
@@ -64,15 +445,12 @@ EXPECTED_HEADERS = {
 # ── Conexión a Google Sheets ─────────────────────────────────────────────────
 def get_gspread_client():
     """Autenticación con Service Account."""
-    # Detectar si estamos en Streamlit Cloud o local
     if "gcp_service_account" in st.secrets:
-        # Streamlit Cloud - usar secrets
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
             scopes=SCOPES
         )
     elif SA_FILE.exists():
-        # Local - usar archivo
         creds = Credentials.from_service_account_file(str(SA_FILE), scopes=SCOPES)
     else:
         st.error(
@@ -81,33 +459,25 @@ def get_gspread_client():
             "En Streamlit Cloud: configura secrets."
         )
         st.stop()
-    
+
     return gspread.authorize(creds)
 
 
 def _find_header_row(all_values: list[list[str]], marker: str) -> int:
-    """Busca la fila que contiene el marcador en cualquier celda (header real).
-
-    Algunas hojas (Vendidos, Pedidos) tienen filas vacías o de título antes
-    de la fila real de encabezados. Esta función escanea hasta encontrar
-    una fila que contenga la palabra clave 'marker' (ej: 'Producto').
-    """
+    """Busca la fila que contiene el marcador en cualquier celda (header real)."""
     for idx, row in enumerate(all_values):
-        # Buscar en todas las celdas de la fila
         for cell in row:
             if marker.lower() in str(cell).lower():
                 return idx
-    return 0  # fallback: primera fila
+    return 0
 
 
 def _clean_currency(val: str) -> float:
-    """Limpia valores monetarios: '$40,000.00' → 40000.0, '$14.91' → 14.91."""
+    """Limpia valores monetarios: '$40,000.00' -> 40000.0."""
     if pd.isna(val) or val is None:
         return 0.0
     s = str(val).strip()
-    # Remover símbolo de moneda y espacios
     s = re.sub(r'[$ ]', '', s)
-    # Remover comas de miles
     s = s.replace(',', '')
     try:
         return float(s)
@@ -116,13 +486,12 @@ def _clean_currency(val: str) -> float:
 
 
 def _clean_pct(val: str) -> float:
-    """Limpia porcentajes: '22.42%' → 0.2242, '0.35' → 0.35."""
+    """Limpia porcentajes: '22.42%' -> 0.2242."""
     if pd.isna(val) or val is None:
         return 0.0
     s = str(val).strip().replace('%', '')
     try:
         v = float(s)
-        # Si el valor es >5, asumimos que es porcentaje (ej: 22.42 → 0.2242)
         if abs(v) > 5:
             return v / 100
         return v
@@ -132,12 +501,7 @@ def _clean_pct(val: str) -> float:
 
 @st.cache_data(ttl=60)
 def load_sheet(sheet_name: str) -> pd.DataFrame:
-    """Carga una hoja del spreadsheet y devuelve un DataFrame limpio.
-
-    Detecta automáticamente la fila de encabezados buscando una columna
-    clave (ej: 'Producto'). Esto maneja hojas donde los headers no están
-    en la fila 1.
-    """
+    """Carga una hoja del spreadsheet y devuelve un DataFrame limpio."""
     try:
         gc = get_gspread_client()
         spreadsheet = gc.open(SPREADSHEET_NAME)
@@ -147,7 +511,6 @@ def load_sheet(sheet_name: str) -> pd.DataFrame:
         if not all_values:
             return pd.DataFrame()
 
-        # Detectar fila de headers buscando la palabra clave
         marker = EXPECTED_HEADERS.get(sheet_name, "Producto")
         header_idx = _find_header_row(all_values, marker)
 
@@ -157,13 +520,9 @@ def load_sheet(sheet_name: str) -> pd.DataFrame:
         if not data:
             return pd.DataFrame()
 
-        # Crear DataFrame
         df = pd.DataFrame(data, columns=headers)
-
-        # Eliminar columnas con nombre vacío
         df = df.loc[:, df.columns.str.strip() != ""]
 
-        # Renombrar duplicados con sufijo
         cols = df.columns.tolist()
         seen = {}
         new_cols = []
@@ -177,7 +536,6 @@ def load_sheet(sheet_name: str) -> pd.DataFrame:
                 new_cols.append(c_clean)
         df.columns = new_cols
 
-        # Limpiar celdas vacías y filas vacías
         df = df.replace("", None)
         df = df.dropna(how="all")
 
@@ -199,10 +557,8 @@ def load_vendidos_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Carga la hoja 'Vendidos' y la separa en dos DataFrames independientes.
 
     La hoja 'Vendidos' contiene DOS tablas lado a lado:
-    - Izquierda (cols 1-8): Tabla de VENTAS (Producto, Categoría, Fecha, etc.)
-    - Derecha (cols 13-20): Tabla de GASTOS/COSTOS (Descripción, Categoría del Gasto, Monto, etc.)
-
-    Retorna (df_ventas, df_gastos).
+    - Izquierda (cols 1-8): Tabla de VENTAS
+    - Derecha (cols 13-20): Tabla de GASTOS/COSTOS
     """
     try:
         gc = get_gspread_client()
@@ -213,7 +569,6 @@ def load_vendidos_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
         if not all_values:
             return pd.DataFrame(), pd.DataFrame()
 
-        # Detectar fila de headers (buscar "Producto" en la fila)
         header_idx = _find_header_row(all_values, "Producto")
         headers = all_values[header_idx]
         data = all_values[header_idx + 1:]
@@ -221,8 +576,8 @@ def load_vendidos_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
         if not data:
             return pd.DataFrame(), pd.DataFrame()
 
-        # ── TABLA DE VENTAS (columnas 1-8: Producto … ¿En Stock?) ────────
-        ventas_cols_idx = list(range(1, 9))  # índices 1,2,3,4,5,6,7,8
+        # ── TABLA DE VENTAS (columnas 1-8) ────────
+        ventas_cols_idx = list(range(1, 9))
         ventas_headers = [headers[i].strip() for i in ventas_cols_idx if i < len(headers)]
         ventas_data = []
         for row in data:
@@ -232,14 +587,13 @@ def load_vendidos_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
         df_ventas = pd.DataFrame(ventas_data, columns=ventas_headers)
         df_ventas = df_ventas.replace("", None)
 
-        # Filtrar: solo filas con Producto no vacío y no es la fila "Total"
         first_col = df_ventas.columns[0] if len(df_ventas.columns) > 0 else None
         if first_col:
             df_ventas = df_ventas.dropna(subset=[first_col])
             df_ventas = df_ventas[~df_ventas[first_col].str.strip().str.lower().isin(["total", ""])]
 
-        # ── TABLA DE GASTOS (columnas 13-20: Descripción … Proveedor) ────
-        gastos_cols_idx = list(range(13, 21))  # índices 13,14,15,16,17,18,19,20
+        # ── TABLA DE GASTOS (columnas 13-20) ────
+        gastos_cols_idx = list(range(13, 21))
         gastos_headers = [headers[i].strip() for i in gastos_cols_idx if i < len(headers)]
         gastos_data = []
         for row in data:
@@ -249,13 +603,11 @@ def load_vendidos_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
         df_gastos = pd.DataFrame(gastos_data, columns=gastos_headers)
         df_gastos = df_gastos.replace("", None)
 
-        # Filtrar: solo filas que tengan descripción del costo
         first_gasto_col = df_gastos.columns[0] if len(df_gastos.columns) > 0 else None
         if first_gasto_col:
             df_gastos = df_gastos.dropna(subset=[first_gasto_col])
             df_gastos = df_gastos[df_gastos[first_gasto_col].str.strip() != ""]
 
-        # Renombrar duplicados en gastos si los hay
         for df in [df_ventas, df_gastos]:
             cols = df.columns.tolist()
             seen = {}
@@ -296,7 +648,6 @@ def fmt_usd(val: float) -> str:
 
 
 def fmt_pct(val: float) -> str:
-    """Formatea decimal como porcentaje (0.35 → 35.0%)."""
     return f"{val * 100:.1f}%"
 
 
@@ -305,10 +656,7 @@ def empty_warning(name: str):
 
 
 def col_exists(df: pd.DataFrame, col: str) -> str | None:
-    """Busca una columna con coincidencia parcial (case-insensitive).
-    Útil porque los nombres pueden variar ligeramente con paréntesis, tildes, etc.
-    Retorna el nombre exacto de la columna o None.
-    """
+    """Busca columna con coincidencia parcial (case-insensitive)."""
     col_lower = col.lower()
     for c in df.columns:
         if col_lower in c.lower():
@@ -316,26 +664,26 @@ def col_exists(df: pd.DataFrame, col: str) -> str | None:
     return None
 
 
-# ── Carga de datos ───────────────────────────────────────────────────────────
-st.title("📊 Dashboard MORAES")
-st.caption("Datos en tiempo real desde Google Sheets • Actualización cada 60 s")
+# ══════════════════════════════════════════════════════════════════════════════
+# CARGA DE DATOS
+# ══════════════════════════════════════════════════════════════════════════════
+render_header()
 
-with st.spinner("Cargando datos de Google Sheets…"):
-    # Vendidos: se separa en tabla de ventas y tabla de gastos (están lado a lado)
+with st.spinner("⏳ Conectando con Google Sheets..."):
     df_vendidos, df_gastos_vendidos = load_vendidos_tables()
     df_rentabilidad = load_sheet("Modelo Unitario de Rentabilidad")
     df_pedidos = load_sheet("Pedidos")
     df_proveedores = load_sheet("proveedores")
 
-if st.button("🔄 Actualizar datos"):
-    st.cache_data.clear()
-    st.rerun()
+col_btn, col_space = st.columns([1, 5])
+with col_btn:
+    if st.button("🔄 Actualizar datos"):
+        st.cache_data.clear()
+        st.rerun()
 
-st.markdown("---")
+styled_separator()
 
 # ── Preprocesamiento — VENDIDOS ──────────────────────────────────────────────
-# Columnas reales: Producto, Categoría, Fecha de Venta, Cantidad Vendida,
-#   Precio Unitario (USD), Ingreso Total (USD), Método de Pago, ¿En Stock?
 COL_V_PRODUCTO = "Producto"
 COL_V_CATEGORIA = col_exists(df_vendidos, "Categor") or "Categoría"
 COL_V_FECHA = col_exists(df_vendidos, "Fecha de Venta") or "Fecha de Venta"
@@ -357,9 +705,7 @@ if not df_vendidos.empty:
         )
         df_vendidos["Mes"] = df_vendidos[COL_V_FECHA].dt.to_period("M").astype(str)
 
-# ── Preprocesamiento — GASTOS (tabla derecha de la hoja Vendidos) ────────────
-# Columnas reales: Descripción del Costo, Categoría del Gasto, Fecha de Pago,
-#   Monto (USD), Método de Pago, Producto Asociado/Referencia, ¿Pagado?, Proveedor
+# ── Preprocesamiento — GASTOS ────────────────────────────────────────────────
 COL_G_DESCRIPCION = col_exists(df_gastos_vendidos, "Descripci") or "Descripción del Costo"
 COL_G_CATEGORIA = col_exists(df_gastos_vendidos, "Categor") or "Categoría del Gasto"
 COL_G_FECHA = col_exists(df_gastos_vendidos, "Fecha de Pago") or "Fecha de Pago"
@@ -376,10 +722,6 @@ if not df_gastos_vendidos.empty:
         )
 
 # ── Preprocesamiento — RENTABILIDAD ──────────────────────────────────────────
-# Columnas reales: Producto, Método de venta, Precio de compra del producto (COP),
-#   Precio de compra del producto (USD), Envio de colombia a EE.UU, Empaque,
-#   Publicidad, Comisión, Costo Total, Precio de venta (USD), Ganancias (USD),
-#   MARGIN, ROI
 COL_R_PRODUCTO = "Producto"
 COL_R_METODO = col_exists(df_rentabilidad, "todo de venta") or "Método de venta"
 COL_R_COMPRA_USD = col_exists(df_rentabilidad, "compra del producto (USD)") or "Precio de compra del producto (USD)"
@@ -396,14 +738,10 @@ if not df_rentabilidad.empty:
     for c in [COL_R_MARGIN, COL_R_ROI]:
         if c in df_rentabilidad.columns:
             df_rentabilidad[c] = safe_pct(df_rentabilidad, c)
-    # Limpiar filas con producto vacío (filas basura)
     df_rentabilidad = df_rentabilidad.dropna(subset=[COL_R_PRODUCTO])
     df_rentabilidad = df_rentabilidad[df_rentabilidad[COL_R_PRODUCTO].str.strip() != ""]
 
 # ── Preprocesamiento — PEDIDOS ───────────────────────────────────────────────
-# Columnas reales: Referencia del Pedido, Producto, Proveedor, Cantidad Solicitada,
-#   Costo Unitario (COP), Costo Unitario Estimado (USD), Costo Total Estimado (USD),
-#   Fecha Estimada de Llegada, ¿Pedido Confirmado?
 COL_P_REF = col_exists(df_pedidos, "Referencia") or "Referencia del Pedido"
 COL_P_PRODUCTO = "Producto"
 COL_P_PROVEEDOR = "Proveedor"
@@ -421,7 +759,6 @@ if not df_pedidos.empty:
         df_pedidos[COL_P_FECHA] = pd.to_datetime(
             df_pedidos[COL_P_FECHA], errors="coerce", dayfirst=True
         )
-    # Limpiar filas sin producto
     df_pedidos = df_pedidos.dropna(subset=[COL_P_PRODUCTO])
     df_pedidos = df_pedidos[df_pedidos[COL_P_PRODUCTO].str.strip() != ""]
 
@@ -432,23 +769,23 @@ if not df_pedidos.empty:
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📈 Panel General",
     "💰 Rentabilidad",
-    "🔀 Comparación de Canales",
+    "🔀 Canales de Venta",
     "📦 Pedidos e Inventario",
     "🏷️ Costos por Producto",
     "🤝 Proveedores",
 ])
 
+
 # ──────────────────────────────────────────────────────────────────────────────
 # TAB 1 — Panel General
 # ──────────────────────────────────────────────────────────────────────────────
 with tab1:
-    st.header("📈 Panel General")
+    section_title("📈", "Panel General", "Resumen ejecutivo de ventas, gastos y rentabilidad")
 
     if df_vendidos.empty:
         empty_warning("Vendidos")
     else:
         ventas_totales = df_vendidos[COL_V_INGRESO].sum() if COL_V_INGRESO in df_vendidos.columns else 0
-        # Gastos reales desde la tabla de costos de la hoja Vendidos
         gastos_totales = df_gastos_vendidos[COL_G_MONTO].sum() if not df_gastos_vendidos.empty and COL_G_MONTO in df_gastos_vendidos.columns else 0
         ganancia_neta = ventas_totales - gastos_totales
         cant_ventas = df_vendidos[COL_V_CANTIDAD].sum() if COL_V_CANTIDAD in df_vendidos.columns else 0
@@ -465,12 +802,12 @@ with tab1:
         )
         k4.metric("🎫 Ticket Promedio", fmt_usd(ticket_promedio))
 
-        st.markdown("---")
+        styled_separator()
 
         col_chart, col_top = st.columns([2, 1])
 
         with col_chart:
-            st.subheader("Ventas vs Gastos por Mes")
+            section_title("📊", "Ventas vs Gastos", "Comparativa mensual de ingresos y egresos")
             if "Mes" in df_vendidos.columns and COL_V_INGRESO in df_vendidos.columns:
                 ventas_mes = (
                     df_vendidos.groupby("Mes")[COL_V_INGRESO]
@@ -483,20 +820,24 @@ with tab1:
                 fig_vg = px.bar(
                     ventas_mes, x="Mes", y=["Ventas", "Gastos"],
                     barmode="group", text_auto="$.2f",
-                    color_discrete_sequence=["#00cc96", "#ef553b"],
+                    color_discrete_sequence=[COLORS["secondary"], COLORS["negative"]],
                     labels={"value": "USD", "variable": ""},
                 )
+                apply_chart_theme(fig_vg)
                 fig_vg.update_layout(
-                    template="plotly_dark",
-                    legend=dict(orientation="h", y=-0.15),
-                    margin=dict(t=20),
+                    legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
+                    bargap=0.3,
+                )
+                fig_vg.update_traces(
+                    marker_line_width=0,
+                    marker_cornerradius=6,
                 )
                 st.plotly_chart(fig_vg, use_container_width=True)
             else:
                 st.info("No hay datos de fecha para graficar por mes.")
 
         with col_top:
-            st.subheader("🏆 Top 3 Productos")
+            section_title("🏆", "Top 3 Productos", "Por cantidad vendida")
             if COL_V_CANTIDAD in df_vendidos.columns:
                 top3 = (
                     df_vendidos.groupby(COL_V_PRODUCTO)[COL_V_CANTIDAD]
@@ -505,14 +846,27 @@ with tab1:
                     .head(3)
                     .reset_index()
                 )
+                medals = ["🥇", "🥈", "🥉"]
                 for i, row in top3.iterrows():
-                    medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
-                    st.markdown(f"**{medal} {row[COL_V_PRODUCTO]}** — {int(row[COL_V_CANTIDAD])} uds")
+                    medal = medals[i] if i < 3 else ""
+                    pct = (row[COL_V_CANTIDAD] / cant_ventas * 100) if cant_ventas > 0 else 0
+                    st.markdown(f"""
+                    <div style="background: {COLORS['bg_card']}; border: 1px solid {COLORS['border']};
+                         border-radius: 10px; padding: 12px 16px; margin-bottom: 8px;
+                         transition: all 0.3s ease;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: {COLORS['text']};">
+                            {medal} {row[COL_V_PRODUCTO]}
+                        </div>
+                        <div style="color: {COLORS['text_muted']}; font-size: 0.85rem; margin-top: 4px;">
+                            {int(row[COL_V_CANTIDAD])} unidades · {pct:.1f}% del total
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-        st.markdown("---")
+        styled_separator()
 
-        # Gráfico de pastel: distribución de gastos por categoría (datos reales de costos)
-        st.subheader("🥧 Distribución de Gastos por Categoría")
+        # Gráfico de pastel: distribución de gastos por categoría
+        section_title("🥧", "Distribución de Gastos", "Desglose por categoría de gasto")
         if not df_gastos_vendidos.empty and COL_G_CATEGORIA in df_gastos_vendidos.columns and COL_G_MONTO in df_gastos_vendidos.columns:
             gastos_cat = (
                 df_gastos_vendidos.dropna(subset=[COL_G_CATEGORIA])
@@ -521,13 +875,36 @@ with tab1:
                 .reset_index()
             )
             if not gastos_cat.empty:
-                fig_pie = px.pie(
-                    gastos_cat, names=COL_G_CATEGORIA, values=COL_G_MONTO,
-                    hole=0.4, color_discrete_sequence=px.colors.qualitative.Set2,
-                )
-                fig_pie.update_layout(template="plotly_dark", margin=dict(t=20))
-                fig_pie.update_traces(textinfo="percent+label")
-                st.plotly_chart(fig_pie, use_container_width=True)
+                col_pie, col_detail = st.columns([2, 1])
+                with col_pie:
+                    fig_pie = px.pie(
+                        gastos_cat, names=COL_G_CATEGORIA, values=COL_G_MONTO,
+                        hole=0.5, color_discrete_sequence=COLOR_SEQ_PRIMARY,
+                    )
+                    apply_chart_theme(fig_pie, height=400)
+                    fig_pie.update_traces(
+                        textinfo="percent+label",
+                        textfont=dict(size=12, color=COLORS["text"]),
+                        marker=dict(line=dict(color=COLORS["bg_dark"], width=2)),
+                        pull=[0.03] * len(gastos_cat),
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
+
+                with col_detail:
+                    st.markdown(f"<br>", unsafe_allow_html=True)
+                    for _, row in gastos_cat.sort_values(COL_G_MONTO, ascending=False).iterrows():
+                        pct = (row[COL_G_MONTO] / gastos_totales * 100) if gastos_totales > 0 else 0
+                        st.markdown(f"""
+                        <div style="background: {COLORS['bg_card']}; border-left: 3px solid {COLORS['primary_light']};
+                             border-radius: 8px; padding: 10px 14px; margin-bottom: 6px;">
+                            <div style="font-weight: 600; color: {COLORS['text']}; font-size: 0.9rem;">
+                                {row[COL_G_CATEGORIA]}
+                            </div>
+                            <div style="color: {COLORS['accent']}; font-weight: 700; font-size: 1rem;">
+                                {fmt_usd(row[COL_G_MONTO])} <span style="color: {COLORS['text_muted']}; font-size: 0.8rem;">({pct:.1f}%)</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
         else:
             st.info("No hay datos de gastos disponibles para el gráfico.")
 
@@ -536,7 +913,7 @@ with tab1:
 # TAB 2 — Rentabilidad
 # ──────────────────────────────────────────────────────────────────────────────
 with tab2:
-    st.header("💰 Rentabilidad")
+    section_title("💰", "Análisis de Rentabilidad", "ROI, márgenes y ganancias por producto y canal")
 
     if df_rentabilidad.empty:
         empty_warning("Modelo Unitario de Rentabilidad")
@@ -576,45 +953,65 @@ with tab2:
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("📈 ROI Promedio", fmt_pct(roi_prom))
             m2.metric("📊 MARGIN Promedio", fmt_pct(margin_prom))
-            m3.metric("💵 Ganancia Unitaria Prom.", fmt_usd(ganancia_prom))
+            m3.metric("💵 Ganancia Unit. Prom.", fmt_usd(ganancia_prom))
             m4.metric("🏷️ Precio Venta Prom.", fmt_usd(precio_venta_prom))
 
-            st.markdown("---")
+            styled_separator()
 
             gc1, gc2 = st.columns(2)
 
             with gc1:
-                st.subheader("ROI por Producto y Método")
+                section_title("📈", "ROI por Producto y Método")
                 fig_roi = px.bar(
                     df_r, x=COL_R_PRODUCTO, y=COL_R_ROI,
                     color=COL_R_METODO if COL_R_METODO in df_r.columns else None,
                     barmode="group",
                     text=df_r[COL_R_ROI].apply(lambda v: f"{v*100:.1f}%"),
-                    color_discrete_sequence=px.colors.qualitative.Vivid,
+                    color_discrete_sequence=[COLORS["secondary"], COLORS["primary_light"], COLORS["accent"]],
                     hover_data=[COL_R_GANANCIA, COL_R_VENTA] if COL_R_GANANCIA in df_r.columns else None,
                 )
-                fig_roi.update_layout(template="plotly_dark", margin=dict(t=20))
+                apply_chart_theme(fig_roi)
                 fig_roi.update_xaxes(tickangle=-45)
+                fig_roi.update_traces(marker_cornerradius=5)
                 st.plotly_chart(fig_roi, use_container_width=True)
 
             with gc2:
-                st.subheader("MARGIN por Producto y Método")
+                section_title("📊", "MARGIN por Producto y Método")
                 fig_mar = px.bar(
                     df_r, x=COL_R_PRODUCTO, y=COL_R_MARGIN,
                     color=COL_R_METODO if COL_R_METODO in df_r.columns else None,
                     barmode="group",
                     text=df_r[COL_R_MARGIN].apply(lambda v: f"{v*100:.1f}%"),
-                    color_discrete_sequence=px.colors.qualitative.Pastel,
+                    color_discrete_sequence=[COLORS["accent"], COLORS["primary_light"], COLORS["secondary"]],
                     hover_data=[COL_R_GANANCIA, COL_R_COSTO] if COL_R_GANANCIA in df_r.columns else None,
                 )
-                fig_mar.update_layout(template="plotly_dark", margin=dict(t=20))
+                apply_chart_theme(fig_mar)
                 fig_mar.update_xaxes(tickangle=-45)
+                fig_mar.update_traces(marker_cornerradius=5)
                 st.plotly_chart(fig_mar, use_container_width=True)
 
-            st.markdown("---")
+            styled_separator()
+
+            # Scatter plot: ROI vs MARGIN
+            if COL_R_ROI in df_r.columns and COL_R_MARGIN in df_r.columns:
+                section_title("🔍", "ROI vs MARGIN", "Análisis bidimensional de rentabilidad")
+                fig_scatter = px.scatter(
+                    df_r, x=COL_R_ROI, y=COL_R_MARGIN,
+                    color=COL_R_PRODUCTO,
+                    size=df_r[COL_R_GANANCIA].abs() if COL_R_GANANCIA in df_r.columns else None,
+                    symbol=COL_R_METODO if COL_R_METODO in df_r.columns else None,
+                    color_discrete_sequence=COLOR_SEQ_PRIMARY,
+                    hover_data=[COL_R_PRODUCTO, COL_R_GANANCIA, COL_R_VENTA],
+                    labels={COL_R_ROI: "ROI", COL_R_MARGIN: "MARGIN"},
+                )
+                apply_chart_theme(fig_scatter, height=400)
+                fig_scatter.update_traces(marker=dict(line=dict(width=1, color=COLORS["border"])))
+                st.plotly_chart(fig_scatter, use_container_width=True)
+
+            styled_separator()
 
             # Tabla detallada
-            st.subheader("📋 Tabla Detallada")
+            section_title("📋", "Tabla Detallada")
             df_display = df_r.copy()
             if COL_R_ROI in df_display.columns:
                 df_display[COL_R_ROI] = df_display[COL_R_ROI].apply(fmt_pct)
@@ -625,7 +1022,7 @@ with tab2:
                     df_display[c] = df_display[c].apply(fmt_usd)
             st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-            st.markdown("---")
+            styled_separator()
 
             # Mejor y peor ROI
             if COL_R_ROI in df_r.columns:
@@ -648,7 +1045,7 @@ with tab2:
 # TAB 3 — Comparación de Canales
 # ──────────────────────────────────────────────────────────────────────────────
 with tab3:
-    st.header("🔀 Comparación de Canales de Venta")
+    section_title("🔀", "Comparación de Canales de Venta", "FBA vs FBM vs Directo: rentabilidad por canal")
 
     if df_rentabilidad.empty or COL_R_METODO not in df_rentabilidad.columns:
         empty_warning("Modelo Unitario de Rentabilidad")
@@ -658,17 +1055,30 @@ with tab3:
         if not canales:
             st.info("No se encontraron canales de venta.")
         else:
+            # Canal cards con íconos
+            canal_icons = {"FBA": "📦", "FBM": "🚚", "DIRECTO": "🏪", "Directo": "🏪"}
             cols = st.columns(len(canales))
             for i, canal in enumerate(canales):
                 sub = df_rentabilidad[df_rentabilidad[COL_R_METODO] == canal]
+                icon = canal_icons.get(canal, "📊")
                 with cols[i]:
-                    st.markdown(f"### {canal}")
+                    st.markdown(f"""
+                    <div style="text-align: center; background: {COLORS['bg_card']};
+                         border: 1px solid {COLORS['border']}; border-radius: 14px;
+                         padding: 20px 16px; margin-bottom: 16px;
+                         border-top: 3px solid {[COLORS['primary_light'], COLORS['secondary'], COLORS['accent']][i % 3]};">
+                        <div style="font-size: 2rem; margin-bottom: 8px;">{icon}</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: {COLORS['text']}; margin-bottom: 12px;">
+                            {canal}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     st.metric("ROI Prom.", fmt_pct(sub[COL_R_ROI].mean()))
                     st.metric("MARGIN Prom.", fmt_pct(sub[COL_R_MARGIN].mean()))
                     st.metric("Ganancia Prom.", fmt_usd(sub[COL_R_GANANCIA].mean()))
                     st.metric("Productos", len(sub))
 
-            st.markdown("---")
+            styled_separator()
 
             agg = (
                 df_rentabilidad.groupby(COL_R_METODO)
@@ -679,53 +1089,65 @@ with tab3:
 
             c1, c2 = st.columns(2)
             with c1:
-                st.subheader("ROI Promedio por Canal")
+                section_title("📈", "ROI Promedio por Canal")
                 fig = px.bar(
                     agg, x=COL_R_METODO, y=COL_R_ROI,
                     text=agg[COL_R_ROI].apply(lambda v: f"{v*100:.1f}%"),
                     color=COL_R_METODO,
-                    color_discrete_sequence=["#636efa", "#00cc96", "#ef553b"],
+                    color_discrete_sequence=[COLORS["primary_light"], COLORS["secondary"], COLORS["accent"]],
                 )
-                fig.update_layout(template="plotly_dark", showlegend=False, margin=dict(t=20))
+                apply_chart_theme(fig)
+                fig.update_layout(showlegend=False)
+                fig.update_traces(marker_cornerradius=6)
                 st.plotly_chart(fig, use_container_width=True)
 
             with c2:
-                st.subheader("MARGIN Promedio por Canal")
+                section_title("📊", "MARGIN Promedio por Canal")
                 fig = px.bar(
                     agg, x=COL_R_METODO, y=COL_R_MARGIN,
                     text=agg[COL_R_MARGIN].apply(lambda v: f"{v*100:.1f}%"),
                     color=COL_R_METODO,
-                    color_discrete_sequence=["#636efa", "#00cc96", "#ef553b"],
+                    color_discrete_sequence=[COLORS["primary_light"], COLORS["secondary"], COLORS["accent"]],
                 )
-                fig.update_layout(template="plotly_dark", showlegend=False, margin=dict(t=20))
+                apply_chart_theme(fig)
+                fig.update_layout(showlegend=False)
+                fig.update_traces(marker_cornerradius=6)
                 st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("---")
+            styled_separator()
 
-            st.subheader("Ganancia vs Costo por Canal")
+            section_title("💰", "Ganancia vs Costo por Canal", "Comparativa de rentabilidad absoluta")
             fig_gc = px.bar(
                 agg, x=COL_R_METODO,
                 y=[COL_R_GANANCIA, COL_R_COSTO],
                 barmode="group", text_auto="$.2f",
-                color_discrete_sequence=["#00cc96", "#ef553b"],
+                color_discrete_sequence=[COLORS["secondary"], COLORS["negative"]],
                 labels={"value": "USD", "variable": ""},
             )
+            apply_chart_theme(fig_gc)
             fig_gc.update_layout(
-                template="plotly_dark",
-                legend=dict(orientation="h", y=-0.15),
-                margin=dict(t=20),
+                legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
+                bargap=0.3,
             )
+            fig_gc.update_traces(marker_cornerradius=6)
             st.plotly_chart(fig_gc, use_container_width=True)
 
-            st.markdown("---")
+            styled_separator()
 
             p1, p2 = st.columns(2)
             canal_counts = df_rentabilidad.groupby(COL_R_METODO).size().reset_index(name="Unidades")
             with p1:
-                st.subheader("📦 Productos por Canal")
-                fig = px.pie(canal_counts, names=COL_R_METODO, values="Unidades", hole=0.4)
-                fig.update_layout(template="plotly_dark", margin=dict(t=20))
-                fig.update_traces(textinfo="percent+label")
+                section_title("📦", "Productos por Canal")
+                fig = px.pie(canal_counts, names=COL_R_METODO, values="Unidades", hole=0.5)
+                apply_chart_theme(fig, height=380)
+                fig.update_traces(
+                    textinfo="percent+label",
+                    textfont=dict(size=12, color=COLORS["text"]),
+                    marker=dict(
+                        colors=[COLORS["primary_light"], COLORS["secondary"], COLORS["accent"]],
+                        line=dict(color=COLORS["bg_dark"], width=2),
+                    ),
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
             ingresos_canal = (
@@ -733,13 +1155,20 @@ with tab3:
                 .sum().reset_index().rename(columns={COL_R_VENTA: "Ingresos"})
             )
             with p2:
-                st.subheader("💵 Ingresos por Canal")
-                fig = px.pie(ingresos_canal, names=COL_R_METODO, values="Ingresos", hole=0.4)
-                fig.update_layout(template="plotly_dark", margin=dict(t=20))
-                fig.update_traces(textinfo="percent+label")
+                section_title("💵", "Ingresos por Canal")
+                fig = px.pie(ingresos_canal, names=COL_R_METODO, values="Ingresos", hole=0.5)
+                apply_chart_theme(fig, height=380)
+                fig.update_traces(
+                    textinfo="percent+label",
+                    textfont=dict(size=12, color=COLORS["text"]),
+                    marker=dict(
+                        colors=[COLORS["primary_light"], COLORS["secondary"], COLORS["accent"]],
+                        line=dict(color=COLORS["bg_dark"], width=2),
+                    ),
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("---")
+            styled_separator()
 
             mejor_canal = agg.loc[agg[COL_R_ROI].idxmax(), COL_R_METODO]
             mejor_roi = agg.loc[agg[COL_R_ROI].idxmax(), COL_R_ROI]
@@ -753,7 +1182,7 @@ with tab3:
 # TAB 4 — Pedidos e Inventario
 # ──────────────────────────────────────────────────────────────────────────────
 with tab4:
-    st.header("📦 Pedidos e Inventario")
+    section_title("📦", "Pedidos e Inventario", "Seguimiento de pedidos, inversiones y llegadas estimadas")
 
     if df_pedidos.empty:
         empty_warning("Pedidos")
@@ -783,7 +1212,7 @@ with tab4:
         k3.metric("💰 Inversión Total", fmt_usd(inversion_total))
         k4.metric("✅ Inversión Confirmada", fmt_usd(inversion_conf))
 
-        st.markdown("---")
+        styled_separator()
 
         f1, f2 = st.columns(2)
         with f1:
@@ -809,23 +1238,27 @@ with tab4:
         else:
             # Inversión por producto
             if COL_P_COSTO_TOTAL in df_p.columns:
-                st.subheader("💰 Inversión por Producto")
+                section_title("💰", "Inversión por Producto")
                 inv_prod = (
                     df_p.groupby(COL_P_PRODUCTO)[COL_P_COSTO_TOTAL]
                     .sum().sort_values(ascending=False).reset_index()
                 )
                 fig = px.bar(
                     inv_prod, x=COL_P_PRODUCTO, y=COL_P_COSTO_TOTAL,
-                    text_auto="$.2f", color_discrete_sequence=["#636efa"],
+                    text_auto="$.2f",
+                    color=COL_P_PRODUCTO,
+                    color_discrete_sequence=COLOR_SEQ_PRIMARY,
                 )
-                fig.update_layout(template="plotly_dark", margin=dict(t=20))
+                apply_chart_theme(fig)
+                fig.update_layout(showlegend=False)
                 fig.update_xaxes(tickangle=-45)
+                fig.update_traces(marker_cornerradius=6)
                 st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("---")
+            styled_separator()
 
             # Tabla
-            st.subheader("📋 Detalle de Pedidos")
+            section_title("📋", "Detalle de Pedidos")
             df_tabla = df_p.copy()
             df_tabla["Estado"] = df_tabla["_confirmado"].map(
                 {True: "✅ Confirmado", False: "⏳ Pendiente"}
@@ -833,40 +1266,51 @@ with tab4:
             cols_show = [c for c in df_tabla.columns if not c.startswith("_")]
             st.dataframe(df_tabla[cols_show], use_container_width=True, hide_index=True)
 
-            st.markdown("---")
+            styled_separator()
 
             # Timeline
             if COL_P_FECHA in df_p.columns:
                 df_timeline = df_p.dropna(subset=[COL_P_FECHA])
                 if not df_timeline.empty and COL_P_CANTIDAD in df_timeline.columns:
-                    st.subheader("📅 Timeline de Llegadas Estimadas")
+                    section_title("📅", "Timeline de Llegadas Estimadas")
                     fig_tl = px.scatter(
                         df_timeline,
                         x=COL_P_FECHA, y=COL_P_PRODUCTO,
                         size=COL_P_CANTIDAD, color=COL_P_PRODUCTO,
                         hover_data=[COL_P_PROVEEDOR, COL_P_COSTO_TOTAL] if COL_P_PROVEEDOR in df_timeline.columns else None,
                         size_max=40,
+                        color_discrete_sequence=COLOR_SEQ_PRIMARY,
                     )
+                    apply_chart_theme(fig_tl)
                     fig_tl.update_layout(
-                        template="plotly_dark", showlegend=False, margin=dict(t=20),
+                        showlegend=False,
                         yaxis=dict(categoryorder="total ascending"),
                     )
+                    fig_tl.update_traces(marker=dict(line=dict(width=1, color=COLORS["border"])))
                     st.plotly_chart(fig_tl, use_container_width=True)
 
-            st.markdown("---")
+            styled_separator()
 
-            c1, c2 = st.columns(2)
+            c1, c2 = st.columns([2, 1])
             with c1:
                 if COL_P_CANTIDAD in df_p.columns:
-                    st.subheader("📦 Unidades por Producto")
+                    section_title("📦", "Unidades por Producto")
                     uds = df_p.groupby(COL_P_PRODUCTO)[COL_P_CANTIDAD].sum().reset_index()
-                    fig = px.pie(uds, names=COL_P_PRODUCTO, values=COL_P_CANTIDAD, hole=0.4)
-                    fig.update_layout(template="plotly_dark", margin=dict(t=20))
-                    fig.update_traces(textinfo="percent+label")
+                    fig = px.pie(uds, names=COL_P_PRODUCTO, values=COL_P_CANTIDAD, hole=0.5)
+                    apply_chart_theme(fig, height=380)
+                    fig.update_traces(
+                        textinfo="percent+label",
+                        textfont=dict(size=12, color=COLORS["text"]),
+                        marker=dict(
+                            colors=COLOR_SEQ_PRIMARY[:len(uds)],
+                            line=dict(color=COLORS["bg_dark"], width=2),
+                        ),
+                    )
                     st.plotly_chart(fig, use_container_width=True)
 
             with c2:
-                st.subheader("📊 Resumen")
+                section_title("📊", "Resumen de Pedidos")
+                st.markdown(f"<br>", unsafe_allow_html=True)
                 if COL_P_CANTIDAD in df_p.columns:
                     st.metric("Total Unidades", int(df_p[COL_P_CANTIDAD].sum()))
                 if COL_P_COSTO_TOTAL in df_p.columns:
@@ -879,7 +1323,7 @@ with tab4:
 # TAB 5 — Costos por Producto
 # ──────────────────────────────────────────────────────────────────────────────
 with tab5:
-    st.header("🏷️ Costos por Producto")
+    section_title("🏷️", "Costos por Producto", "Análisis detallado de la estructura de costos")
 
     if df_rentabilidad.empty:
         empty_warning("Modelo Unitario de Rentabilidad")
@@ -920,37 +1364,48 @@ with tab5:
             m3.metric("📋 Ítems de Costo", items_costo)
             m4.metric("📊 Costo Promedio", fmt_usd(costo_promedio))
 
-            st.markdown("---")
+            styled_separator()
 
             c1, c2 = st.columns(2)
             with c1:
                 if COL_R_METODO in df_c.columns:
-                    st.subheader("Distribución por Canal")
+                    section_title("🥧", "Distribución por Canal")
                     dist_canal = df_c.groupby(COL_R_METODO)[COL_R_COSTO].sum().reset_index()
-                    fig = px.pie(dist_canal, names=COL_R_METODO, values=COL_R_COSTO, hole=0.4)
-                    fig.update_layout(template="plotly_dark", margin=dict(t=20))
-                    fig.update_traces(textinfo="percent+label")
+                    fig = px.pie(dist_canal, names=COL_R_METODO, values=COL_R_COSTO, hole=0.5)
+                    apply_chart_theme(fig, height=380)
+                    fig.update_traces(
+                        textinfo="percent+label",
+                        textfont=dict(size=12, color=COLORS["text"]),
+                        marker=dict(
+                            colors=[COLORS["primary_light"], COLORS["secondary"], COLORS["accent"]],
+                            line=dict(color=COLORS["bg_dark"], width=2),
+                        ),
+                    )
                     st.plotly_chart(fig, use_container_width=True)
 
             with c2:
-                st.subheader("Costos por Producto")
+                section_title("📊", "Costos por Producto")
                 cost_prod = (
                     df_c.groupby(COL_R_PRODUCTO)[COL_R_COSTO]
                     .sum().sort_values(ascending=False).reset_index()
                 )
                 fig = px.bar(
                     cost_prod, x=COL_R_PRODUCTO, y=COL_R_COSTO,
-                    text_auto="$.2f", color_discrete_sequence=["#ef553b"],
+                    text_auto="$.2f",
+                    color=COL_R_PRODUCTO,
+                    color_discrete_sequence=COLOR_SEQ_PRIMARY,
                 )
-                fig.update_layout(template="plotly_dark", margin=dict(t=20))
+                apply_chart_theme(fig)
+                fig.update_layout(showlegend=False)
                 fig.update_xaxes(tickangle=-45)
+                fig.update_traces(marker_cornerradius=6)
                 st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("---")
+            styled_separator()
 
             # Desglose por canal (solo si un producto seleccionado)
             if len(sel_prod_c) == 1 and COL_R_METODO in df_c.columns:
-                st.subheader(f"📊 Desglose por Canal — {sel_prod_c[0]}")
+                section_title("📊", f"Desglose por Canal — {sel_prod_c[0]}")
                 canales_prod = df_c[COL_R_METODO].dropna().unique().tolist()
                 if canales_prod:
                     tabs_canal = st.tabs(canales_prod)
@@ -962,10 +1417,10 @@ with tab5:
                             sc2.metric("Ganancia", fmt_usd(sub[COL_R_GANANCIA].sum()))
                             sc3.metric("ROI", fmt_pct(sub[COL_R_ROI].mean()))
                             sc4.metric("MARGIN", fmt_pct(sub[COL_R_MARGIN].mean()))
-                st.markdown("---")
+                styled_separator()
 
             # Tabla completa
-            st.subheader("📋 Tabla Completa")
+            section_title("📋", "Tabla Completa")
             df_cost_display = df_c.copy()
             for c in [COL_R_COMPRA_USD, COL_R_VENTA, COL_R_COSTO, COL_R_GANANCIA]:
                 if c in df_cost_display.columns:
@@ -985,7 +1440,7 @@ with tab5:
 # TAB 6 — Proveedores
 # ──────────────────────────────────────────────────────────────────────────────
 with tab6:
-    st.header("🤝 Proveedores")
+    section_title("🤝", "Directorio de Proveedores", "Gestión de proveedores, contactos y confiabilidad")
 
     if df_proveedores.empty:
         empty_warning("proveedores")
@@ -1007,7 +1462,7 @@ with tab6:
         m2.metric("📞 Con Teléfono", int(con_tel))
         m3.metric("🏷️ Tipo Principal", tipo_principal)
 
-        st.markdown("---")
+        styled_separator()
 
         f1, f2 = st.columns(2)
         with f1:
@@ -1034,31 +1489,47 @@ with tab6:
             c1, c2 = st.columns([2, 1])
             with c1:
                 if "Tipo de proveedor" in df_pv.columns:
-                    st.subheader("Proveedores por Tipo")
+                    section_title("📊", "Proveedores por Tipo")
                     tipo_count = df_pv.groupby("Tipo de proveedor").size().reset_index(name="Cantidad")
                     fig = px.pie(
-                        tipo_count, names="Tipo de proveedor", values="Cantidad", hole=0.4,
-                        color_discrete_sequence=px.colors.qualitative.Set3,
+                        tipo_count, names="Tipo de proveedor", values="Cantidad", hole=0.5,
+                        color_discrete_sequence=COLOR_SEQ_PRIMARY,
                     )
-                    fig.update_layout(template="plotly_dark", margin=dict(t=20))
-                    fig.update_traces(textinfo="percent+label")
+                    apply_chart_theme(fig, height=380)
+                    fig.update_traces(
+                        textinfo="percent+label",
+                        textfont=dict(size=12, color=COLORS["text"]),
+                        marker=dict(line=dict(color=COLORS["bg_dark"], width=2)),
+                    )
                     st.plotly_chart(fig, use_container_width=True)
 
             with c2:
-                st.subheader("🏆 Más Usados en Pedidos")
+                section_title("🏆", "Más Usados en Pedidos")
                 if not df_pedidos.empty and COL_P_PROVEEDOR in df_pedidos.columns:
                     top_prov = (
                         df_pedidos[COL_P_PROVEEDOR].value_counts().head(5).reset_index()
                     )
                     top_prov.columns = ["Proveedor", "Pedidos"]
-                    for _, row in top_prov.iterrows():
-                        st.markdown(f"**{row['Proveedor']}** — {row['Pedidos']} pedidos")
+                    for idx, row in top_prov.iterrows():
+                        rank = idx + 1
+                        st.markdown(f"""
+                        <div style="background: {COLORS['bg_card']}; border: 1px solid {COLORS['border']};
+                             border-left: 3px solid {COLORS['secondary']};
+                             border-radius: 8px; padding: 10px 14px; margin-bottom: 6px;">
+                            <div style="font-weight: 600; color: {COLORS['text']}; font-size: 0.9rem;">
+                                #{rank} {row['Proveedor']}
+                            </div>
+                            <div style="color: {COLORS['text_muted']}; font-size: 0.8rem;">
+                                {row['Pedidos']} pedidos
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
                 else:
                     st.info("No hay datos de pedidos para cruzar.")
 
-            st.markdown("---")
+            styled_separator()
 
-            st.subheader("📇 Detalle por Proveedor")
+            section_title("📇", "Detalle por Proveedor")
             for _, prov in df_pv.iterrows():
                 nombre = prov.get("Proveedor", "Sin nombre")
                 with st.expander(f"🏢 {nombre}"):
@@ -1072,9 +1543,9 @@ with tab6:
                         st.markdown(f"**Confiabilidad:** {prov.get('Confiabilidad', 'N/A')}")
                         st.markdown(f"**Notas:** {prov.get('Notas', 'N/A')}")
 
-            st.markdown("---")
+            styled_separator()
 
-            st.subheader("📋 Vista de Tabla")
+            section_title("📋", "Vista de Tabla")
             st.dataframe(
                 df_pv, use_container_width=True, hide_index=True,
                 column_config={
@@ -1090,5 +1561,5 @@ with tab6:
 
 
 # ── Footer ───────────────────────────────────────────────────────────────────
-st.markdown("---")
-st.caption("Dashboard MORAES • Datos actualizados desde Google Sheets cada 60 segundos")
+styled_separator()
+render_footer()
