@@ -64,13 +64,24 @@ EXPECTED_HEADERS = {
 # ── Conexión a Google Sheets ─────────────────────────────────────────────────
 def get_gspread_client():
     """Autenticación con Service Account."""
-    if not SA_FILE.exists():
+    # Detectar si estamos en Streamlit Cloud o local
+    if "gcp_service_account" in st.secrets:
+        # Streamlit Cloud - usar secrets
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=SCOPES
+        )
+    elif SA_FILE.exists():
+        # Local - usar archivo
+        creds = Credentials.from_service_account_file(str(SA_FILE), scopes=SCOPES)
+    else:
         st.error(
-            f"No se encontró **{SA_FILE.name}**. "
-            "Coloca el archivo de credenciales de Service Account en la misma carpeta."
+            "No se encontraron credenciales. "
+            "En local: coloca service_account.json. "
+            "En Streamlit Cloud: configura secrets."
         )
         st.stop()
-    creds = Credentials.from_service_account_file(str(SA_FILE), scopes=SCOPES)
+    
     return gspread.authorize(creds)
 
 
