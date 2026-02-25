@@ -815,7 +815,24 @@ with tab1:
                     .reset_index()
                     .rename(columns={COL_V_INGRESO: "Ventas"})
                 )
-                ventas_mes["Gastos"] = gastos_totales / len(ventas_mes) if len(ventas_mes) > 0 else 0
+                # Gastos reales por mes desde la tabla de gastos
+                if (
+                    not df_gastos_vendidos.empty
+                    and COL_G_FECHA in df_gastos_vendidos.columns
+                    and COL_G_MONTO in df_gastos_vendidos.columns
+                ):
+                    df_g_temp = df_gastos_vendidos.dropna(subset=[COL_G_FECHA]).copy()
+                    df_g_temp["Mes"] = df_g_temp[COL_G_FECHA].dt.to_period("M").astype(str)
+                    gastos_mes = (
+                        df_g_temp.groupby("Mes")[COL_G_MONTO]
+                        .sum()
+                        .reset_index()
+                        .rename(columns={COL_G_MONTO: "Gastos"})
+                    )
+                    ventas_mes = ventas_mes.merge(gastos_mes, on="Mes", how="left")
+                    ventas_mes["Gastos"] = ventas_mes["Gastos"].fillna(0)
+                else:
+                    ventas_mes["Gastos"] = 0
 
                 fig_vg = px.bar(
                     ventas_mes, x="Mes", y=["Ventas", "Gastos"],
