@@ -824,38 +824,57 @@ with tab1:
 
         styled_separator()
 
+        # ── Preparación de datos Ventas vs Gastos (outer join para no perder meses) ──
+        _vg_ventas_all = pd.DataFrame()
+        _vg_gastos_raw = pd.DataFrame()
+        _vg_has_gastos = False
+
+        if "Mes" in df_vendidos.columns and COL_V_INGRESO in df_vendidos.columns:
+            _vg_ventas_all = (
+                df_vendidos.groupby("Mes")[COL_V_INGRESO]
+                .sum().reset_index()
+                .rename(columns={COL_V_INGRESO: "Ventas"})
+            )
+            if (
+                not df_gastos_vendidos.empty
+                and COL_G_FECHA in df_gastos_vendidos.columns
+                and COL_G_MONTO in df_gastos_vendidos.columns
+            ):
+                _vg_gastos_raw = df_gastos_vendidos.dropna(subset=[COL_G_FECHA]).copy()
+                _vg_gastos_raw["Mes"] = _vg_gastos_raw[COL_G_FECHA].dt.to_period("M").astype(str)
+                _vg_has_gastos = True
+                _vg_gastos_agg = (
+                    _vg_gastos_raw.groupby("Mes")[COL_G_MONTO]
+                    .sum().reset_index()
+                    .rename(columns={COL_G_MONTO: "Gastos"})
+                )
+                # outer join: incluye meses con solo gastos (ej. nov 2025 sin ventas)
+                _vg_ventas_all = _vg_ventas_all.merge(_vg_gastos_agg, on="Mes", how="outer")
+                _vg_ventas_all["Ventas"] = _vg_ventas_all["Ventas"].fillna(0)
+                _vg_ventas_all["Gastos"] = _vg_ventas_all["Gastos"].fillna(0)
+            else:
+                _vg_ventas_all["Gastos"] = 0
+            _vg_ventas_all = _vg_ventas_all.sort_values("Mes").reset_index(drop=True)
+
+        _vg_all_months = _vg_ventas_all["Mes"].tolist() if not _vg_ventas_all.empty else []
+        _vg_sel = st.multiselect(
+            "🗓️ Filtrar por mes",
+            options=_vg_all_months,
+            default=_vg_all_months,
+            key="vg_meses",
+        )
+        _vg_data = (
+            _vg_ventas_all[_vg_ventas_all["Mes"].isin(_vg_sel)]
+            if _vg_sel else _vg_ventas_all
+        )
+
         col_chart, col_top = st.columns([2, 1])
 
         with col_chart:
             section_title("📊", "Ventas vs Gastos", "Comparativa mensual de ingresos y egresos")
-            if "Mes" in df_vendidos.columns and COL_V_INGRESO in df_vendidos.columns:
-                ventas_mes = (
-                    df_vendidos.groupby("Mes")[COL_V_INGRESO]
-                    .sum()
-                    .reset_index()
-                    .rename(columns={COL_V_INGRESO: "Ventas"})
-                )
-                # Gastos reales por mes desde la tabla de gastos
-                if (
-                    not df_gastos_vendidos.empty
-                    and COL_G_FECHA in df_gastos_vendidos.columns
-                    and COL_G_MONTO in df_gastos_vendidos.columns
-                ):
-                    df_g_temp = df_gastos_vendidos.dropna(subset=[COL_G_FECHA]).copy()
-                    df_g_temp["Mes"] = df_g_temp[COL_G_FECHA].dt.to_period("M").astype(str)
-                    gastos_mes = (
-                        df_g_temp.groupby("Mes")[COL_G_MONTO]
-                        .sum()
-                        .reset_index()
-                        .rename(columns={COL_G_MONTO: "Gastos"})
-                    )
-                    ventas_mes = ventas_mes.merge(gastos_mes, on="Mes", how="left")
-                    ventas_mes["Gastos"] = ventas_mes["Gastos"].fillna(0)
-                else:
-                    ventas_mes["Gastos"] = 0
-
+            if not _vg_ventas_all.empty:
                 fig_vg = px.bar(
-                    ventas_mes, x="Mes", y=["Ventas", "Gastos"],
+                    _vg_data, x="Mes", y=["Ventas", "Gastos"],
                     barmode="group", text_auto="$.2f",
                     color_discrete_sequence=[COLORS["secondary"], COLORS["negative"]],
                     labels={"value": "USD", "variable": ""},
@@ -865,10 +884,7 @@ with tab1:
                     legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
                     bargap=0.3,
                 )
-                fig_vg.update_traces(
-                    marker_line_width=0,
-                    marker_cornerradius=6,
-                )
+                fig_vg.update_traces(marker_line_width=0, marker_cornerradius=6)
                 st.plotly_chart(fig_vg, use_container_width=True)
             else:
                 st.info("No hay datos de fecha para graficar por mes.")
@@ -899,6 +915,60 @@ with tab1:
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+
+        # ── Tortas por período cuando hay filtro activo ───────────────────────
+        _vg_filtered = bool(_vg_sel) and set(_vg_sel) != set(_vg_all_months)
+        if _vg_filtered and not _vg_data.empty:
+            styled_separator()
+            meses_label = ", ".join(_vg_sel)
+            section_title("🥧", "Desglose del período seleccionado", meses_label)
+            pie_v, pie_g = st.columns(2)
+
+            with pie_v:
+                section_title("💚", "Ventas por Producto")
+                df_v_filt = df_vendidos[df_vendidos["Mes"].isin(_vg_sel)]
+                if not df_v_filt.empty and COL_V_INGRESO in df_v_filt.columns:
+                    vp = df_v_filt.groupby(COL_V_PRODUCTO)[COL_V_INGRESO].sum().reset_index()
+                    fig_pv = px.pie(
+                        vp, names=COL_V_PRODUCTO, values=COL_V_INGRESO,
+                        hole=0.5, color_discrete_sequence=COLOR_SEQ_PRIMARY,
+                    )
+                    apply_chart_theme(fig_pv, height=380)
+                    fig_pv.update_traces(
+                        textinfo="percent+label",
+                        textfont=dict(size=11, color=COLORS["text"]),
+                        marker=dict(line=dict(color=COLORS["bg_dark"], width=2)),
+                        pull=[0.03] * len(vp),
+                    )
+                    st.plotly_chart(fig_pv, use_container_width=True)
+
+            with pie_g:
+                section_title("🔴", "Gastos por Categoría")
+                if (
+                    _vg_has_gastos
+                    and not _vg_gastos_raw.empty
+                    and COL_G_CATEGORIA in _vg_gastos_raw.columns
+                ):
+                    df_g_filt = _vg_gastos_raw[_vg_gastos_raw["Mes"].isin(_vg_sel)]
+                    if not df_g_filt.empty:
+                        gp = df_g_filt.groupby(COL_G_CATEGORIA)[COL_G_MONTO].sum().reset_index()
+                        fig_pg = px.pie(
+                            gp, names=COL_G_CATEGORIA, values=COL_G_MONTO,
+                            hole=0.5,
+                            color_discrete_sequence=[
+                                COLORS["negative"], COLORS["accent"],
+                                COLORS["primary_light"], "#8b5cf6",
+                                "#06b6d4", "#ec4899",
+                            ],
+                        )
+                        apply_chart_theme(fig_pg, height=380)
+                        fig_pg.update_traces(
+                            textinfo="percent+label",
+                            textfont=dict(size=11, color=COLORS["text"]),
+                            marker=dict(line=dict(color=COLORS["bg_dark"], width=2)),
+                            pull=[0.03] * len(gp),
+                        )
+                        st.plotly_chart(fig_pg, use_container_width=True)
 
         styled_separator()
 
