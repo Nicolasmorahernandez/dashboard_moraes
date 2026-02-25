@@ -19,6 +19,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pathlib, re
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+TZ_BOGOTA = ZoneInfo("America/Bogota")
 
 # ── Configuración de página ──────────────────────────────────────────────────
 st.set_page_config(
@@ -335,7 +338,7 @@ st.markdown(f"""
 # ══════════════════════════════════════════════════════════════════════════════
 def render_header():
     """Renderiza el header principal del dashboard."""
-    now = datetime.now().strftime("%d/%m/%Y %H:%M")
+    now = datetime.now(tz=TZ_BOGOTA).strftime("%d/%m/%Y %H:%M")
     st.markdown(f"""
     <div class="dashboard-header">
         <div>
@@ -367,7 +370,7 @@ def styled_separator():
 
 def render_footer():
     """Renderiza el footer personalizado."""
-    now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    now = datetime.now(tz=TZ_BOGOTA).strftime("%d/%m/%Y %H:%M:%S")
     st.markdown(f"""
     <div class="custom-footer">
         <strong>Dashboard MORAES</strong> · Datos actualizados desde Google Sheets cada 60s<br/>
