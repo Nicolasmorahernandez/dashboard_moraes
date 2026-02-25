@@ -17,7 +17,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import gspread
 from google.oauth2.service_account import Credentials
-import pathlib, re
+import pathlib, re, base64
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -336,14 +336,35 @@ st.markdown(f"""
 # ══════════════════════════════════════════════════════════════════════════════
 # FUNCIONES DE DISEÑO (helpers visuales)
 # ══════════════════════════════════════════════════════════════════════════════
+def _get_logo_b64() -> str:
+    """Lee logo_moraes.png y lo devuelve como base64 para embeber en HTML."""
+    logo_path = pathlib.Path(__file__).parent / "logo_moraes.png"
+    if logo_path.exists():
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    return ""
+
+
 def render_header():
     """Renderiza el header principal del dashboard."""
     now = datetime.now(tz=TZ_BOGOTA).strftime("%d/%m/%Y %H:%M")
+    _logo_b64 = _get_logo_b64()
+    if _logo_b64:
+        _logo_html = (
+            f'<img src="data:image/png;base64,{_logo_b64}" '
+            f'style="width:52px; height:52px; border-radius:10px; '
+            f'object-fit:cover; margin-right:14px; flex-shrink:0;">'
+        )
+    else:
+        _logo_html = '<span style="font-size:2rem; margin-right:10px;">📊</span>'
     st.markdown(f"""
     <div class="dashboard-header">
-        <div>
-            <h1>📊 Dashboard MORAES</h1>
-            <div class="subtitle">Analítica financiera en tiempo real · Google Sheets</div>
+        <div style="display:flex; align-items:center;">
+            {_logo_html}
+            <div>
+                <h1 style="margin:0;">Dashboard MORAES</h1>
+                <div class="subtitle">Analítica financiera en tiempo real · Google Sheets</div>
+            </div>
         </div>
         <div class="header-badge">🕐 {now}</div>
     </div>
