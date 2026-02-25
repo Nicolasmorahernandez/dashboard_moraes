@@ -890,10 +890,21 @@ with tab1:
                 st.info("No hay datos de fecha para graficar por mes.")
 
         with col_top:
-            section_title("🏆", "Top 3 Productos", "Por cantidad vendida")
-            if COL_V_CANTIDAD in df_vendidos.columns:
+            # ── Top 3: usa datos filtrados si hay filtro activo ───────────────
+            _vg_filtered = bool(_vg_sel) and set(_vg_sel) != set(_vg_all_months)
+            _df_top_base = (
+                df_vendidos[df_vendidos["Mes"].isin(_vg_sel)]
+                if _vg_filtered and "Mes" in df_vendidos.columns
+                else df_vendidos
+            )
+            _top_subtitle = (
+                f"Período: {', '.join(_vg_sel)}" if _vg_filtered else "Por cantidad vendida"
+            )
+            section_title("🏆", "Top 3 Productos", _top_subtitle)
+            if COL_V_CANTIDAD in _df_top_base.columns and not _df_top_base.empty:
+                _top_total = _df_top_base[COL_V_CANTIDAD].sum()
                 top3 = (
-                    df_vendidos.groupby(COL_V_PRODUCTO)[COL_V_CANTIDAD]
+                    _df_top_base.groupby(COL_V_PRODUCTO)[COL_V_CANTIDAD]
                     .sum()
                     .sort_values(ascending=False)
                     .head(3)
@@ -902,7 +913,7 @@ with tab1:
                 medals = ["🥇", "🥈", "🥉"]
                 for i, row in top3.iterrows():
                     medal = medals[i] if i < 3 else ""
-                    pct = (row[COL_V_CANTIDAD] / cant_ventas * 100) if cant_ventas > 0 else 0
+                    pct = (row[COL_V_CANTIDAD] / _top_total * 100) if _top_total > 0 else 0
                     st.markdown(f"""
                     <div style="background: {COLORS['bg_card']}; border: 1px solid {COLORS['border']};
                          border-radius: 10px; padding: 12px 16px; margin-bottom: 8px;
@@ -915,6 +926,8 @@ with tab1:
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+            elif _vg_filtered:
+                st.info("Sin ventas en el período seleccionado.")
 
         # ── Tortas por período cuando hay filtro activo ───────────────────────
         _vg_filtered = bool(_vg_sel) and set(_vg_sel) != set(_vg_all_months)
