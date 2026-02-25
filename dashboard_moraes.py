@@ -628,6 +628,28 @@ def load_vendidos_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
         return pd.DataFrame(), pd.DataFrame()
 
 
+# ── Meses en español → número ────────────────────────────────────────────────
+MESES_ES = {
+    "ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4,
+    "MAYO": 5, "JUNIO": 6, "JULIO": 7, "AGOSTO": 8,
+    "SEPTIEMBRE": 9, "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12,
+}
+
+
+def _parse_fecha_gasto(val) -> pd.Timestamp:
+    """Parsea 'ENERO 2026' o fechas estándar a Timestamp."""
+    if pd.isna(val) or val is None:
+        return pd.NaT
+    s = str(val).strip().upper()
+    parts = s.split()
+    if len(parts) == 2 and parts[0] in MESES_ES:
+        try:
+            return pd.Timestamp(year=int(parts[1]), month=MESES_ES[parts[0]], day=1)
+        except Exception:
+            return pd.NaT
+    return pd.to_datetime(val, dayfirst=True, errors="coerce")
+
+
 # ── Funciones auxiliares ─────────────────────────────────────────────────────
 def safe_numeric(df: pd.DataFrame, col: str) -> pd.Series:
     """Convierte columna a numérico, limpiando $ y comas primero."""
@@ -717,9 +739,7 @@ if not df_gastos_vendidos.empty:
     if COL_G_MONTO in df_gastos_vendidos.columns:
         df_gastos_vendidos[COL_G_MONTO] = safe_numeric(df_gastos_vendidos, COL_G_MONTO)
     if COL_G_FECHA in df_gastos_vendidos.columns:
-        df_gastos_vendidos[COL_G_FECHA] = pd.to_datetime(
-            df_gastos_vendidos[COL_G_FECHA], errors="coerce", dayfirst=True
-        )
+        df_gastos_vendidos[COL_G_FECHA] = df_gastos_vendidos[COL_G_FECHA].apply(_parse_fecha_gasto)
 
 # ── Preprocesamiento — RENTABILIDAD ──────────────────────────────────────────
 COL_R_PRODUCTO = "Producto"
