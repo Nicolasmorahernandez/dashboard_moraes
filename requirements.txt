@@ -4,3 +4,11 @@ google-auth
 google-auth-oauthlib
 plotly
 pandas
+
+# Automatización Amazon SP-API
+python-amazon-sp-api==2.1.8
+python-dotenv
+
+# Alertas y reportes
+requests
+fpdf2

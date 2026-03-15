@@ -463,6 +463,7 @@ EXPECTED_HEADERS = {
     "Pedidos": "Producto",
     "Modelo Unitario de Rentabilidad": "Producto",
     "proveedores": "Proveedor",
+    "Ordenes Amazon": "Order ID",
 }
 
 
@@ -720,6 +721,7 @@ with st.spinner("⏳ Conectando con Google Sheets..."):
     df_rentabilidad = load_sheet("Modelo Unitario de Rentabilidad")
     df_pedidos = load_sheet("Pedidos")
     df_proveedores = load_sheet("proveedores")
+    df_ordenes = load_sheet("Ordenes Amazon")
 
 col_btn, col_space = st.columns([1, 5])
 with col_btn:
@@ -810,13 +812,14 @@ if not df_pedidos.empty:
 # ══════════════════════════════════════════════════════════════════════════════
 # PESTAÑAS
 # ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📈 Panel General",
     "💰 Rentabilidad",
     "🔀 Canales de Venta",
     "📦 Pedidos e Inventario",
     "🏷️ Costos por Producto",
     "🤝 Proveedores",
+    "📦 Órdenes Amazon",
 ])
 
 
@@ -1702,6 +1705,183 @@ with tab6:
             st.download_button(
                 "📥 Descargar CSV", csv, "proveedores_moraes.csv", "text/csv", key="dl_prov",
             )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TAB 7 — Órdenes Amazon
+# ──────────────────────────────────────────────────────────────────────────────
+with tab7:
+    section_title("📦", "Órdenes Amazon", "Estado en tiempo real de tus órdenes Amazon")
+
+    if df_ordenes.empty:
+        empty_warning("Ordenes Amazon")
+        st.info("Corre `python automations/sync_pedidos.py --setup` para crear la hoja y luego el sync diario.")
+    else:
+        # ── Preprocesamiento ─────────────────────────────────────────────────
+        df_ord = df_ordenes.copy()
+
+        # Normalizar columnas numéricas
+        for col_n in ["Unidades", "Total (USD)"]:
+            if col_n in df_ord.columns:
+                df_ord[col_n] = pd.to_numeric(
+                    df_ord[col_n].astype(str).str.replace("$", "").str.replace(",", ""),
+                    errors="coerce"
+                ).fillna(0)
+
+        # Parsear fechas
+        for col_d in ["Fecha Compra", "Fecha Envio", "Entrega Estimada"]:
+            if col_d in df_ord.columns:
+                df_ord[col_d] = pd.to_datetime(df_ord[col_d], errors="coerce")
+
+        # Limpiar filas sin Order ID
+        if "Order ID" in df_ord.columns:
+            df_ord = df_ord[df_ord["Order ID"].notna() & (df_ord["Order ID"].str.strip() != "")]
+
+        # ── Filtros ──────────────────────────────────────────────────────────
+        f1, f2, f3 = st.columns(3)
+
+        estados_disp = ["Todos"] + sorted(df_ord["Estado"].dropna().unique().tolist()) if "Estado" in df_ord.columns else ["Todos"]
+        fulfil_disp  = ["Todos"] + sorted(df_ord["Fulfillment"].dropna().unique().tolist()) if "Fulfillment" in df_ord.columns else ["Todos"]
+
+        with f1:
+            sel_estado = st.selectbox("Estado", estados_disp, key="ord_estado")
+        with f2:
+            sel_fulfil = st.selectbox("Fulfillment", fulfil_disp, key="ord_fulfil")
+        with f3:
+            fecha_min = df_ord["Fecha Compra"].min() if "Fecha Compra" in df_ord.columns and df_ord["Fecha Compra"].notna().any() else None
+            fecha_max = df_ord["Fecha Compra"].max() if "Fecha Compra" in df_ord.columns and df_ord["Fecha Compra"].notna().any() else None
+            if fecha_min and fecha_max:
+                rango = st.date_input(
+                    "Rango de fechas",
+                    value=(fecha_min.date(), fecha_max.date()),
+                    key="ord_fechas",
+                )
+            else:
+                rango = None
+
+        df_f = df_ord.copy()
+        if sel_estado != "Todos" and "Estado" in df_f.columns:
+            df_f = df_f[df_f["Estado"] == sel_estado]
+        if sel_fulfil != "Todos" and "Fulfillment" in df_f.columns:
+            df_f = df_f[df_f["Fulfillment"] == sel_fulfil]
+        if rango and len(rango) == 2 and "Fecha Compra" in df_f.columns:
+            start_d = pd.Timestamp(rango[0])
+            end_d   = pd.Timestamp(rango[1])
+            df_f = df_f[(df_f["Fecha Compra"] >= start_d) & (df_f["Fecha Compra"] <= end_d)]
+
+        styled_separator()
+
+        # ── KPIs ─────────────────────────────────────────────────────────────
+        total_ords    = len(df_f)
+        total_uds     = int(df_f["Unidades"].sum())    if "Unidades"    in df_f.columns else 0
+        total_usd     = df_f["Total (USD)"].sum()       if "Total (USD)" in df_f.columns else 0
+
+        estado_counts = df_f["Estado"].value_counts().to_dict() if "Estado" in df_f.columns else {}
+        n_pendiente   = estado_counts.get("Pendiente", 0)
+        n_enviado     = estado_counts.get("Enviado", 0) + estado_counts.get("Enviado parcial", 0)
+        n_entregado   = estado_counts.get("Entregado", 0)
+        n_cancelado   = estado_counts.get("Cancelado", 0)
+
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Total Órdenes",  total_ords)
+        k2.metric("Pendiente",      n_pendiente)
+        k3.metric("Enviado",        n_enviado)
+        k4.metric("Entregado",      n_entregado)
+        k5.metric("Cancelado",      n_cancelado)
+
+        styled_separator()
+
+        # ── Gráficos ─────────────────────────────────────────────────────────
+        g1, g2 = st.columns(2)
+
+        with g1:
+            section_title("🍩", "Órdenes por Estado")
+            if not df_f.empty and "Estado" in df_f.columns:
+                estado_df = df_f["Estado"].value_counts().reset_index()
+                estado_df.columns = ["Estado", "Cantidad"]
+                color_map = {
+                    "Pendiente":       COLORS["accent"],
+                    "Enviado":         COLORS["primary_light"],
+                    "Enviado parcial": COLORS["secondary_light"],
+                    "Entregado":       COLORS["secondary"],
+                    "Cancelado":       COLORS["negative"],
+                    "No disponible":   COLORS["text_muted"],
+                }
+                fig_donut = px.pie(
+                    estado_df, names="Estado", values="Cantidad",
+                    hole=0.55,
+                    color="Estado",
+                    color_discrete_map=color_map,
+                )
+                fig_donut.update_traces(textposition="outside", textinfo="label+percent")
+                fig_donut.update_layout(
+                    showlegend=False,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font_color=COLORS["text"],
+                    margin=dict(t=20, b=20, l=20, r=20),
+                )
+                st.plotly_chart(fig_donut, use_container_width=True)
+            else:
+                st.info("Sin datos para mostrar.")
+
+        with g2:
+            section_title("📅", "Órdenes por Semana")
+            if not df_f.empty and "Fecha Compra" in df_f.columns and df_f["Fecha Compra"].notna().any():
+                df_time = df_f.dropna(subset=["Fecha Compra"]).copy()
+                df_time["Semana"] = df_time["Fecha Compra"].dt.to_period("W").dt.start_time
+                weekly = df_time.groupby("Semana").size().reset_index(name="Ordenes")
+                fig_line = px.bar(
+                    weekly, x="Semana", y="Ordenes",
+                    color_discrete_sequence=[COLORS["primary_light"]],
+                )
+                fig_line.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font_color=COLORS["text"],
+                    xaxis=dict(gridcolor=COLORS["border"]),
+                    yaxis=dict(gridcolor=COLORS["border"]),
+                    margin=dict(t=20, b=20, l=20, r=20),
+                )
+                st.plotly_chart(fig_line, use_container_width=True)
+            else:
+                st.info("Sin datos de fechas para mostrar.")
+
+        styled_separator()
+
+        # ── Tabla detallada ──────────────────────────────────────────────────
+        section_title("📋", "Detalle de Órdenes")
+
+        cols_show = [c for c in [
+            "Order ID", "Fecha Compra", "Producto", "SKU(s)",
+            "Unidades", "Total (USD)", "Fulfillment", "Estado",
+            "Marketplace", "Fecha Envio", "Entrega Estimada",
+        ] if c in df_f.columns]
+
+        df_tabla = df_f[cols_show].copy()
+
+        # Formatear fechas para display
+        for col_d in ["Fecha Compra", "Fecha Envio", "Entrega Estimada"]:
+            if col_d in df_tabla.columns:
+                df_tabla[col_d] = df_tabla[col_d].dt.strftime("%Y-%m-%d").where(df_tabla[col_d].notna(), "")
+
+        st.dataframe(
+            df_tabla,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Total (USD)": st.column_config.NumberColumn("Total (USD)", format="$%.2f"),
+                "Unidades":    st.column_config.NumberColumn("Uds", format="%d"),
+                "Estado":      st.column_config.TextColumn("Estado"),
+            },
+        )
+
+        styled_separator()
+
+        csv_ord = df_tabla.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Descargar CSV", csv_ord, "ordenes_amazon.csv", "text/csv", key="dl_ordenes"
+        )
 
 
 # ── Footer ───────────────────────────────────────────────────────────────────

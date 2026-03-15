@@ -23,3 +23,14 @@ debug_*.py
 # OS
 .DS_Store
 Thumbs.db
+nul
+
+# Archivos generados
+*.pdf
+*_log.txt
+
+# Claude Code
+.claude/
+
+# Scripts de instalacion locales
+instalación.py
