@@ -733,12 +733,12 @@ styled_separator()
 
 # ── Preprocesamiento — VENDIDOS ──────────────────────────────────────────────
 COL_V_PRODUCTO = "Producto"
-COL_V_CATEGORIA = col_exists(df_vendidos, "Categor") or "Categoría"
-COL_V_FECHA = col_exists(df_vendidos, "Fecha de Venta") or "Fecha de Venta"
-COL_V_CANTIDAD = col_exists(df_vendidos, "Cantidad Vendida") or "Cantidad Vendida"
-COL_V_PRECIO = col_exists(df_vendidos, "Precio Unitario") or "Precio Unitario (USD)"
-COL_V_INGRESO = col_exists(df_vendidos, "Ingreso Total") or "Ingreso Total (USD)"
-COL_V_METODO_PAGO = col_exists(df_vendidos, "todo de Pago") or "Método de Pago"
+COL_V_CATEGORIA  = col_exists(df_vendidos, "Tipo")     or col_exists(df_vendidos, "Categor")   or "Tipo"
+COL_V_FECHA      = col_exists(df_vendidos, "Fecha")    or col_exists(df_vendidos, "Fecha de Venta") or "Fecha"
+COL_V_CANTIDAD   = col_exists(df_vendidos, "Unidades") or col_exists(df_vendidos, "Cantidad")   or "Unidades"
+COL_V_PRECIO     = col_exists(df_vendidos, "Precio")   or col_exists(df_vendidos, "Precio Unitario") or "Precio"
+COL_V_INGRESO    = col_exists(df_vendidos, "Total")    or col_exists(df_vendidos, "Ingreso Total")   or "Total"
+COL_V_METODO_PAGO = col_exists(df_vendidos, "Cuenta")  or col_exists(df_vendidos, "todo de Pago")    or "Cuenta"
 
 if not df_vendidos.empty:
     if COL_V_CANTIDAD in df_vendidos.columns:
