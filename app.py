@@ -3,7 +3,6 @@ import gspread
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 import os
 import pickle
@@ -54,19 +53,22 @@ CHART_SEQ   = ['#3E1F12', '#6B371B', '#944925', '#B5651D', '#C8893A', '#D9A441',
 
 # ── Autenticación ─────────────────────────────────────────────────
 def autenticar():
-    creds = None
+    # Streamlit Cloud: service account desde secrets
+    if 'gcp_service_account' in st.secrets:
+        return gspread.service_account_from_dict(dict(st.secrets['gcp_service_account']))
+
+    # Local: token OAuth desde archivo pickle
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as f:
             creds = pickle.load(f)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('token.pickle', 'wb') as f:
-            pickle.dump(creds, f)
-    return gspread.authorize(creds)
+        if not creds.valid:
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                with open('token.pickle', 'wb') as f:
+                    pickle.dump(creds, f)
+        return gspread.authorize(creds)
+
+    raise RuntimeError("No se encontraron credenciales. Configura gcp_service_account en Streamlit secrets.")
 
 # ── Carga de datos ────────────────────────────────────────────────
 @st.cache_data(ttl=300)
