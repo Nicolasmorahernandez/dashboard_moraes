@@ -830,6 +830,7 @@ PLOTLY_LAYOUT = dict(
     margin=dict(t=10, b=10, l=10, r=10),
 )
 
+st.markdown('<div class="mobile-hidden">', unsafe_allow_html=True)
 g1, g2 = st.columns(2)
 
 with g1:
@@ -897,6 +898,7 @@ with g4:
         st.plotly_chart(fig4, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
 # ── Pagos pendientes ──────────────────────────────────────────────
