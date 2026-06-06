@@ -321,6 +321,69 @@ st.markdown(f"""
   .dash-table tbody tr:hover {{ background:rgba(148,73,37,0.08); }}
   .dash-table tbody td {{ padding:10px 14px; color:{TEXT_MAIN}; vertical-align:middle; }}
   .dash-table tbody tr:last-child {{ border-bottom:none; }}
+
+  /* ── Mobile responsive (≤ 768px) ───────────────────────────── */
+  @media (max-width: 768px) {{
+
+    /* Header compacto */
+    .dash-header {{
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 16px;
+      gap: 10px;
+    }}
+    .dash-title {{ font-size: 1.2rem; }}
+    .dash-subtitle {{ font-size: 0.68rem; }}
+    .dash-date {{ font-size: 0.75rem; padding: 4px 10px; }}
+    .dash-header > div:last-child {{ flex-wrap: wrap; gap: 6px; }}
+
+    /* Cards: padding reducido */
+    .kpi-card {{ padding: 14px 16px; }}
+    .kpi-value {{ font-size: 1.4rem; }}
+    .canal-card {{ padding: 14px 16px; }}
+    .canal-row {{ flex-direction: column; gap: 8px; align-items: flex-start; }}
+    .canal-stat {{ text-align: left; }}
+
+    /* P&L: scroll horizontal (tiene inline flex:0 0 260px que no se puede pisar) */
+    .chart-card {{ overflow-x: auto; }}
+
+    /* KPIs 5-col → grid 2×2+1 */
+    .mobile-kpi-grid [data-testid="stHorizontalBlock"] {{
+      flex-wrap: wrap !important;
+    }}
+    .mobile-kpi-grid [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+      flex: 0 0 50% !important;
+      max-width: 50% !important;
+      min-width: 50% !important;
+    }}
+
+    /* Canales 3-col → 1 columna apilada */
+    .mobile-canal-grid [data-testid="stHorizontalBlock"] {{
+      flex-direction: column !important;
+    }}
+    .mobile-canal-grid [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+      flex: 0 0 100% !important;
+      max-width: 100% !important;
+      min-width: 100% !important;
+    }}
+
+    /* Inventario KPIs 3-col → 2+1 */
+    .mobile-inv-grid [data-testid="stHorizontalBlock"] {{
+      flex-wrap: wrap !important;
+    }}
+    .mobile-inv-grid [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+      flex: 0 0 50% !important;
+      max-width: 50% !important;
+      min-width: 50% !important;
+    }}
+
+    /* Gráficos Plotly y donut: ocultos en mobile */
+    .mobile-hidden {{ display: none !important; }}
+
+    /* Espaciado general */
+    .section-label {{ font-size: 0.65rem; }}
+    [data-testid="stAppViewContainer"] {{ padding: 0 8px !important; }}
+  }}
 </style>
 """, unsafe_allow_html=True)
 
