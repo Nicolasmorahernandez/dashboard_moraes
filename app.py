@@ -54,18 +54,33 @@ CHART_SEQ   = ['#3E1F12', '#6B371B', '#944925', '#B5651D', '#C8893A', '#D9A441',
 
 # ── Autenticación ─────────────────────────────────────────────────
 def autenticar():
+    import streamlit as st
     creds = None
-    if os.path.exists('token.pickle'):
+
+    # Streamlit Cloud: leer token desde secrets
+    if 'token_pickle_b64' in st.secrets:
+        import base64
+        raw = base64.b64decode(st.secrets['token_pickle_b64'])
+        creds = pickle.loads(raw)
+    # Local: leer token desde archivo
+    elif os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as f:
             creds = pickle.load(f)
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
+            # guardar token renovado localmente si es posible
+            if not os.path.exists('/mount/src'):
+                with open('token.pickle', 'wb') as f:
+                    pickle.dump(creds, f)
         else:
+            # Solo funciona en local (requiere browser)
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
-        with open('token.pickle', 'wb') as f:
-            pickle.dump(creds, f)
+            with open('token.pickle', 'wb') as f:
+                pickle.dump(creds, f)
+
     return gspread.authorize(creds)
 
 # ── Carga de datos ────────────────────────────────────────────────
