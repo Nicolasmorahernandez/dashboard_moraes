@@ -347,6 +347,10 @@ st.markdown(f"""
     /* P&L: scroll horizontal (tiene inline flex:0 0 260px que no se puede pisar) */
     .chart-card {{ overflow-x: auto; }}
 
+    /* Streamlit column overrides — usa data-testid internos de Streamlit (no API pública).
+       Si Streamlit cambia su DOM en futuras versiones, revisar estos selectores.
+       !important necesario para pisar los estilos inline que Streamlit inyecta en columnas. */
+
     /* KPIs 5-col → grid 2×2+1 */
     .mobile-kpi-grid [data-testid="stHorizontalBlock"] {{
       flex-wrap: wrap !important;
