@@ -89,7 +89,7 @@ def cargar_gastos_operativos():
         df['Pagado'] = df['¿Pagado?'].astype(str).str.contains('✅|TRUE|true|si|sí', case=False)
         return df
     except Exception as e:
-        st.error(f"Error Gastos Operativos: {e}")
+        st.error(f"Error Gastos Operativos: {type(e).__name__}: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
@@ -134,7 +134,7 @@ def cargar_ventas():
         df['Cobrado'] = ~(cuenta.str.contains('NO HAN PAGADO|NO PAGADO', na=False) | (cuenta == ''))
         return df
     except Exception as e:
-        st.error(f"Error Ventas: {e}")
+        st.error(f"Error Ventas: {type(e).__name__}: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
@@ -153,7 +153,7 @@ def cargar_margenes():
         df = df[~df['SKU'].astype(str).str.startswith('*')]
         return df
     except Exception as e:
-        st.error(f"Error Márgenes: {e}")
+        st.error(f"Error Márgenes: {type(e).__name__}: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
@@ -168,7 +168,7 @@ def cargar_gastos_amazon():
         df['Monto (USD)'] = pd.to_numeric(df['Monto (USD)'].astype(str).str.replace('[$,]', '', regex=True), errors='coerce').fillna(0)
         return df
     except Exception as e:
-        st.error(f"Error Gastos Amazon: {e}")
+        st.error(f"Error Gastos Amazon: {type(e).__name__}: {e}")
         return pd.DataFrame()
 
 # ── Estilos ───────────────────────────────────────────────────────
