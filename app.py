@@ -950,6 +950,7 @@ if not df_inv.empty:
     inv_unidades  = int(df_inv['Stock (ajustable)'].sum())
     inv_margen    = (inv_ganancia / inv_mercado * 100) if inv_mercado else 0
 
+    st.markdown('<div class="mobile-inv-grid">', unsafe_allow_html=True)
     ki1, ki2, ki3 = st.columns(3)
     with ki1:
         st.markdown(f"""
@@ -978,6 +979,7 @@ if not df_inv.empty:
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # Tabla
     st.markdown('<div class="chart-card"><div class="chart-title" style="text-align:center;">Desglose por SKU</div>', unsafe_allow_html=True)
@@ -1006,6 +1008,7 @@ if not df_inv.empty:
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Donut — mismo ancho que la tabla
+    st.markdown('<div class="mobile-hidden">', unsafe_allow_html=True)
     st.markdown('<div class="chart-card"><div class="chart-title" style="text-align:center;">Capital por SKU</div><div style="height:16px;"></div>', unsafe_allow_html=True)
     _, dc, _ = st.columns([1, 2, 1])
     with dc:
@@ -1021,6 +1024,7 @@ if not df_inv.empty:
         )
         fig_inv.update_layout(**PLOTLY_LAYOUT, height=400, showlegend=False)
         st.plotly_chart(fig_inv, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ── Tabla de márgenes ─────────────────────────────────────────────
