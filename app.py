@@ -736,6 +736,7 @@ else:
     _show_rent_amz   = _rent_amz
     _amz_uds_label   = f'{unidades_amazon} unidades'
 
+st.markdown('<div class="mobile-canal-grid">', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
 
 with c1:
@@ -816,6 +817,7 @@ with c3:
       </div>
     </div>""", unsafe_allow_html=True)
 
+st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
 # ── Fila 3: Gráficos ──────────────────────────────────────────────
