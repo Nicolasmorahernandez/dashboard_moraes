@@ -608,6 +608,7 @@ def badge(val, fmt="pct"):
     cls = "badge-green" if val >= 0 else "badge-red"
     return f'<span class="kpi-badge {cls}">{txt}</span>'
 
+st.markdown('<div class="mobile-kpi-grid">', unsafe_allow_html=True)
 k1, k2, k3, k4, k5 = st.columns(5)
 
 with k1:
@@ -676,6 +677,7 @@ with k5:
       {_k5_badge}
     </div>""", unsafe_allow_html=True)
 
+st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
 # ── Fila 2: Canales ───────────────────────────────────────────────
