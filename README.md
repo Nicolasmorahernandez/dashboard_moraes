@@ -14,7 +14,7 @@ Dashboard financiero en tiempo real para **MORAES Leather Goods**, construido co
 - **P&L en cascada** — Ingresos → Margen de contribución → Utilidad operativa
 - **Dos escenarios** — Toggle "Proyectado" (todo cobrado + gastos pendientes) vs. Caja real
 - **Desglose por canal** — Amazon y Directo con rentabilidades reales, toggle "Con inversión pendiente"
-- **Inventario en stock** — Capital a costo, valor a mercado, ganancia potencial por canal
+- **Inventario en stock** — Stock calculado dinámicamente (`Comprado` − unidades vendidas registradas en Ventas), capital a costo, valor a mercado, ganancia potencial por canal
 - **Contabilidad accrual** — Columnas Canal, Tipo (Directo/Estructura) y ¿En inventario? en la hoja de gastos
 - **Gráficos interactivos** — Ventas por canal, gastos por categoría, márgenes por SKU
 - **Paleta cuero** — Diseño oscuro coherente con la marca MORAES
@@ -35,7 +35,10 @@ Dashboard financiero en tiempo real para **MORAES Leather Goods**, construido co
 
 ```
 dashboard/
-├── app.py              # Dashboard principal (Streamlit)
+├── app.py              # Dashboard principal (Streamlit) — layout, KPIs y gráficos
+├── data.py             # Carga y limpieza de datos desde Google Sheets (caché 5 min)
+├── auth.py             # Autenticación Google (service account / OAuth)
+├── constants.py        # IDs de los Sheets y mapeo de SKUs Amazon → internos
 ├── requirements.txt    # Dependencias Python
 ├── crear_hoja_costos.py  # Script utilitario — crea hoja auditoría Amazon en Sheets
 ├── .gitignore
@@ -79,6 +82,12 @@ Abre en `localhost:8501` por defecto.
 | `Canal` | Amazon / Directo / Ambos | Atribución por canal |
 | `Tipo` | Directo / Estructura | COGS vs overhead empresa |
 | `¿En inventario?` | Sí / No | Costo activo cuando se vende |
+
+---
+
+## Inventario dinámico
+
+El dashboard **no usa** la columna `Stock (ajustable)` de la pestaña Inventario: calcula el stock como `Comprado − unidades vendidas` (sumando las hojas de Ventas de ambos canales) y recalcula valor a costo y a mercado sobre el restante. Requiere que todas las ventas estén registradas en las hojas de Ventas; ajustes por conteo físico se hacen en la columna `Comprado`.
 
 ---
 

@@ -1,13 +1,17 @@
 import streamlit as st
-import gspread
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-import os
-import pickle
-from datetime import datetime
+from datetime import datetime, date
+
+from data import (
+    cargar_gastos_operativos,
+    cargar_ventas,
+    cargar_margenes,
+    cargar_gastos_amazon,
+    cargar_inventario,
+    ajustar_inventario_con_ventas,
+)
 
 st.set_page_config(
     page_title="MORAES Dashboard",
@@ -15,21 +19,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
-
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive'
-]
-
-SHEET_FINANZAS_ID = '1ODzs4-V__I5uN5mcbwJrUwIKrDrK6nn-wlii-eKNEhg'
-SHEET_AMAZON_ID   = '1TX0azfGSqKNRhMqKg_VS3iRHx0RMNPWnKGbq3Pwf8cQ'
-
-# Los SKU de Amazon son distintos a los internos pero referencian el mismo producto.
-# Se normalizan al SKU interno para que las ventas se consoliden por producto.
-SKU_MAP = {
-    'BT-CX89-PS3K': '5231',   # Golf Glove Case Holder
-    '96-XO2W-I9FY': '432',    # Single Bottle Wine Carrier
-}
 
 BROWN       = '#271310'
 AMBER       = '#944925'
@@ -45,181 +34,10 @@ RED         = '#f87171'
 RED_DIM     = '#7f1d1d'
 BLUE        = '#60a5fa'
 BLUE_DIM    = '#1e3a5f'
-# Identidad de canales y paleta de gráficos — tonos cuero (marca)
-GOLD        = '#D9A441'   # oro cálido
-CH_AMAZON   = '#B5651D'   # ámbar quemado → canal Amazon
-CH_DIRECTO  = '#D9A441'   # oro → canal Directo
-# secuencia categórica graduada (marrón profundo → oro claro)
+GOLD        = '#D9A441'
+CH_AMAZON   = '#B5651D'
+CH_DIRECTO  = '#D9A441'
 CHART_SEQ   = ['#3E1F12', '#6B371B', '#944925', '#B5651D', '#C8893A', '#D9A441', '#E8C170']
-
-# ── Autenticación ─────────────────────────────────────────────────
-def autenticar():
-    # Streamlit Cloud: service account desde secrets
-    if 'gcp_service_account' in st.secrets:
-        return gspread.service_account_from_dict(dict(st.secrets['gcp_service_account']))
-
-    # Streamlit Cloud fallback: token OAuth base64
-    if 'token_pickle_b64' in st.secrets:
-        import base64
-        creds = pickle.loads(base64.b64decode(st.secrets['token_pickle_b64']))
-        if not creds.valid and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        return gspread.authorize(creds)
-
-    # Local: token OAuth desde archivo
-    creds = None
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as f:
-            creds = pickle.load(f)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            # guardar token renovado localmente si es posible
-            if not os.path.exists('/mount/src'):
-                with open('token.pickle', 'wb') as f:
-                    pickle.dump(creds, f)
-        else:
-            # Solo funciona en local (requiere browser)
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-            with open('token.pickle', 'wb') as f:
-                pickle.dump(creds, f)
-
-    return gspread.authorize(creds)
-
-# ── Carga de datos ────────────────────────────────────────────────
-@st.cache_data(ttl=300)
-def cargar_gastos_operativos():
-    try:
-        gc = autenticar()
-        sh = gc.open_by_key(SHEET_FINANZAS_ID)
-        ws = next(s for s in sh.worksheets() if 'gastos' in s.title.lower() and 'amazon' not in s.title.lower())
-        df = pd.DataFrame(ws.get_all_records(head=4))
-        df.columns = [c.strip() for c in df.columns]
-        df['Monto Total (USD)'] = pd.to_numeric(
-            df['Monto Total (USD)'].astype(str).str.replace('[$,]', '', regex=True), errors='coerce'
-        ).fillna(0)
-        df = df[df['Fecha'].astype(str).str.strip() != '']
-        # excluir filas de totales / leyenda que no son gastos reales
-        df = df[~df['Fecha'].astype(str).str.strip().str.upper().str.startswith('TOTAL')]
-        df = df[~df['Fecha'].astype(str).str.contains('🔴|Fondo rojo|Categorías', na=False)]
-        df['Pagado'] = df['¿Pagado?'].astype(str).str.contains('✅|TRUE|true|si|sí', case=False)
-        if 'Canal' not in df.columns:
-            df['Canal'] = 'Ambos'
-        df['Canal'] = df['Canal'].astype(str).str.strip()
-        if 'Tipo' not in df.columns:
-            df['Tipo'] = 'Directo'
-        df['Tipo'] = df['Tipo'].astype(str).str.strip()
-        if '¿En inventario?' not in df.columns:
-            df['¿En inventario?'] = 'No'
-        df['En inventario'] = df['¿En inventario?'].astype(str).str.strip().str.lower().isin(['sí','si','yes','true'])
-        return df
-    except Exception as e:
-        st.error(f"Error Gastos Operativos: {e}")
-        return pd.DataFrame()
-
-@st.cache_data(ttl=300)
-def cargar_ventas():
-    try:
-        gc = autenticar()
-        frames = []
-        sh1 = gc.open_by_key(SHEET_FINANZAS_ID)
-        ws1 = next((s for s in sh1.worksheets() if 'ventas' in s.title.lower()), None)
-        if ws1:
-            h = ['Fecha','Producto','SKU','Canal','Unidades','Precio Unit (USD)','Total (USD)','Cuenta','Notas']
-            df1 = pd.DataFrame(ws1.get_all_records(head=3, expected_headers=h))
-            df1.columns = [c.strip() for c in df1.columns]
-            df1 = df1[df1['Fecha'].astype(str).str.strip() != '']
-            frames.append(df1)
-        sh2 = gc.open_by_key(SHEET_AMAZON_ID)
-        ws2 = next((s for s in sh2.worksheets() if s.title.strip() == 'Ventas Amazon'), None)
-        if ws2:
-            df2 = pd.DataFrame(ws2.get_all_records(head=3))
-            df2.columns = [c.strip() for c in df2.columns]
-            df2 = df2[df2['Fecha'].astype(str).str.strip() != '']
-            df2 = df2.rename(columns={
-                'Cantidad': 'Unidades',
-                'Precio Unitario (USD)': 'Precio Unit (USD)',
-                'Ingreso Total (USD)': 'Total (USD)',
-                'Fulfillment': 'Cuenta',
-            })
-            if 'Canal' not in df2.columns:
-                df2['Canal'] = 'Amazon'
-            if 'Notas' not in df2.columns:
-                df2['Notas'] = ''
-            frames.append(df2[['Fecha','Producto','SKU','Canal','Unidades','Precio Unit (USD)','Total (USD)','Cuenta','Notas']])
-        df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-        if df.empty:
-            return df
-        # normalizar SKU de Amazon → SKU interno (mismo producto)
-        df['SKU'] = df['SKU'].astype(str).str.strip().replace(SKU_MAP)
-        for col in ['Total (USD)', 'Precio Unit (USD)']:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace('[$,]', '', regex=True), errors='coerce').fillna(0)
-        df['Unidades'] = pd.to_numeric(df['Unidades'], errors='coerce').fillna(0)
-        cuenta = df['Cuenta'].astype(str).str.strip().str.upper()
-        df['Cobrado'] = ~(cuenta.str.contains('NO HAN PAGADO|NO PAGADO', na=False) | (cuenta == ''))
-        return df
-    except Exception as e:
-        st.error(f"Error Ventas: {e}")
-        return pd.DataFrame()
-
-@st.cache_data(ttl=300)
-def cargar_margenes():
-    try:
-        gc = autenticar()
-        sh = gc.open_by_key(SHEET_FINANZAS_ID)
-        ws = next(s for s in sh.worksheets() if 'rgen' in s.title.lower() or 'argen' in s.title.lower())
-        h = ['SKU','Canal','Costo COP','Costo USD','Envío','Empaque','Publicidad','Comisión','Costo Total','Precio Venta','Ganancia','Margen %','ROI %']
-        df = pd.DataFrame(ws.get_all_records(head=3, expected_headers=h))
-        df.columns = [c.strip() for c in df.columns]
-        for col in ['Costo Total', 'Precio Venta', 'Ganancia']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace('[$,%]', '', regex=True), errors='coerce').fillna(0)
-        df = df[df['SKU'].astype(str).str.strip() != '']
-        df = df[~df['SKU'].astype(str).str.startswith('*')]
-        return df
-    except Exception as e:
-        st.error(f"Error Márgenes: {e}")
-        return pd.DataFrame()
-
-@st.cache_data(ttl=300)
-def cargar_gastos_amazon():
-    try:
-        gc = autenticar()
-        sh = gc.open_by_key(SHEET_AMAZON_ID)
-        ws = next(s for s in sh.worksheets() if 'gastos amazon' in s.title.lower() or ('amazon' in s.title.lower() and 'gasto' in s.title.lower()))
-        h = ['Transaction ID','Fecha','Order ID','Tipo de Fee','SKU','Monto (USD)','Descripcion']
-        df = pd.DataFrame(ws.get_all_records(head=2, expected_headers=h))
-        df.columns = [c.strip() for c in df.columns]
-        df['Monto (USD)'] = pd.to_numeric(df['Monto (USD)'].astype(str).str.replace('[$,]', '', regex=True), errors='coerce').fillna(0)
-        return df
-    except Exception as e:
-        st.error(f"Error Gastos Amazon: {e}")
-        return pd.DataFrame()
-
-@st.cache_data(ttl=300)
-def cargar_inventario():
-    try:
-        gc = autenticar()
-        sh = gc.open_by_key(SHEET_FINANZAS_ID)
-        ws = next(s for s in sh.worksheets() if 'inventario' in s.title.lower())
-        df = pd.DataFrame(ws.get_all_records(head=4))
-        df.columns = [c.strip() for c in df.columns]
-        for col in ['Stock (ajustable)', 'Costo Unit. (USD)', 'Valor en Stock (USD)', 'Precio Mercado (USD)', 'Valor a Mercado (USD)']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace('[$,]', '', regex=True), errors='coerce').fillna(0)
-        # solo filas de producto real: SKU no vacío, sin TOTAL ni ⚠️, costo > 0
-        df = df[df['SKU'].astype(str).str.strip() != '']
-        df = df[~df['SKU'].astype(str).str.strip().str.upper().str.startswith('TOTAL')]
-        df = df[df['Costo Unit. (USD)'] > 0]
-        if 'Canal' not in df.columns:
-            df['Canal'] = 'Directo'
-        df['Canal'] = df['Canal'].astype(str).str.strip()
-        return df
-    except Exception as e:
-        st.error(f"Error Inventario: {e}")
-        return pd.DataFrame()
 
 # ── Estilos ───────────────────────────────────────────────────────
 st.markdown(f"""
@@ -344,12 +162,10 @@ st.markdown(f"""
     .canal-row {{ flex-direction: column; gap: 8px; align-items: flex-start; }}
     .canal-stat {{ text-align: left; }}
 
-    /* P&L: scroll horizontal (tiene inline flex:0 0 260px que no se puede pisar) */
+    /* P&L: scroll horizontal */
     .chart-card {{ overflow-x: auto; }}
 
-    /* Streamlit column overrides — usa data-testid internos de Streamlit (no API pública).
-       Si Streamlit cambia su DOM en futuras versiones, revisar estos selectores.
-       !important necesario para pisar los estilos inline que Streamlit inyecta en columnas. */
+    /* Streamlit column overrides */
 
     /* KPIs 5-col → grid 2×2+1 */
     .mobile-kpi-grid [data-testid="stHorizontalBlock"] {{
@@ -397,13 +213,27 @@ with st.spinner("Sincronizando con Google Sheets..."):
     df_ventas   = cargar_ventas()
     df_margenes = cargar_margenes()
     df_amazon   = cargar_gastos_amazon()
-    df_inv      = cargar_inventario()
+    df_inv      = ajustar_inventario_con_ventas(cargar_inventario(), df_ventas)
 
 # ── Filtro de mes (sidebar colapsado) ────────────────────────────
+def _generar_meses(n=14):
+    nombres = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    hoy = date.today()
+    y, m = hoy.year, hoy.month
+    resultado = []
+    for i in range(n - 1, -1, -1):
+        mes = m - i
+        anio = y
+        while mes <= 0:
+            mes += 12
+            anio -= 1
+        resultado.append(f"{nombres[mes - 1]} {anio}")
+    return resultado
+
 with st.sidebar:
     st.markdown(f"<p style='color:{AMBER};font-weight:700;font-size:1rem;'>MORAES</p>", unsafe_allow_html=True)
     st.markdown("---")
-    meses_orden = ['Oct 2025','Nov 2025','Dic 2025','Ene 2026','Feb 2026','Mar 2026','Abr 2026','May 2026']
+    meses_orden = _generar_meses(14)
     mes_sel = st.selectbox("Período", ["Todos"] + meses_orden)
     st.markdown("---")
     if st.button("🔄 Actualizar"):
@@ -411,26 +241,33 @@ with st.sidebar:
         st.rerun()
     st.markdown(f"<small style='color:{TEXT_MUTED}'>MORAES Leather © 2026</small>", unsafe_allow_html=True)
 
+_MES_NUM = {'Ene':1,'Feb':2,'Mar':3,'Abr':4,'May':5,'Jun':6,'Jul':7,'Ago':8,'Sep':9,'Oct':10,'Nov':11,'Dic':12}
+
 def filtrar(df, col='Fecha'):
     if mes_sel == "Todos" or df.empty or col not in df.columns:
         return df
-    return df[df[col].astype(str).str.contains(mes_sel.split()[0], case=False, na=False)]
+    abr, anio = mes_sel.split()[0], int(mes_sel.split()[1])
+    mes_num = _MES_NUM.get(abr)
+    fechas_dt = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
+    if fechas_dt.notna().any():
+        mask = (fechas_dt.dt.month == mes_num) & (fechas_dt.dt.year == anio)
+        if mask.sum() > 0:
+            return df[mask]
+    # fallback para fechas en texto que no parsean como datetime
+    return df[
+        df[col].astype(str).str.contains(abr, case=False, na=False) &
+        df[col].astype(str).str.contains(str(anio), na=False)
+    ]
 
 df_g = filtrar(df_gastos)
 df_v = filtrar(df_ventas)
 
 # ── Cálculos ──────────────────────────────────────────────────────
-# Escenario: caja real (default) vs proyectado (todo cobrado + gastos pagados).
-# El widget toggle se renderiza debajo del header; aquí leemos su estado.
 proyectado = st.session_state.get('proy_toggle', False)
 
-# Ventas cobradas (caja real) vs por cobrar (comprometido)
 df_v_cob = df_v[df_v['Cobrado']] if not df_v.empty and 'Cobrado' in df_v.columns else df_v
-# Fuentes según escenario: en proyectado se asume todo cobrado / todo pagado
 df_v_ing = df_v if proyectado else df_v_cob
 _df_g_base = df_g if proyectado else (df_g[df_g['Pagado']] if not df_g.empty else df_g)
-# Siempre excluir costos de inventario no vendido del P&L y canales
-# (independiente del Proyectado — esos costos se activan manualmente cuando se vende)
 df_g_pag = (
     _df_g_base[~_df_g_base['En inventario']]
     if not _df_g_base.empty and 'En inventario' in _df_g_base.columns
@@ -448,11 +285,9 @@ amazon_ing          = df_v_ing[df_v_ing['Canal']=='Amazon']['Total (USD)'].sum()
 directo_ing         = df_v_ing[df_v_ing['Canal']=='Directo']['Total (USD)'].sum() if not df_v_ing.empty else 0
 gastos_amazon_total = df_amazon['Monto (USD)'].sum() if not df_amazon.empty else 0
 
-# Gastos por canal: solo Tipo='Directo' (COGS, envíos, empaques producto)
-# Estructura queda a nivel empresa en el P&L — no se carga a canales
 _pct_amz = (amazon_ing / (amazon_ing + directo_ing)) if (amazon_ing + directo_ing) else 0.5
 if not df_g_pag.empty and 'Canal' in df_g_pag.columns and 'Tipo' in df_g_pag.columns:
-    _dg_canal = df_g_pag[df_g_pag['Tipo']=='Directo']  # solo costos directos
+    _dg_canal = df_g_pag[df_g_pag['Tipo']=='Directo']
     _g_amazon  = _dg_canal[_dg_canal['Canal']=='Amazon']['Monto Total (USD)'].sum()
     _g_directo = _dg_canal[_dg_canal['Canal']=='Directo']['Monto Total (USD)'].sum()
     _g_ambos   = _dg_canal[_dg_canal['Canal']=='Ambos']['Monto Total (USD)'].sum()
@@ -467,9 +302,7 @@ rentabilidad_amazon  = (neto_amazon / amazon_ing * 100) if amazon_ing else 0
 neto_directo         = directo_ing - gastos_no_amazon
 rentabilidad_directo = (neto_directo / directo_ing * 100) if directo_ing else 0
 
-# ── P&L en dos niveles: Margen de Contribución y Utilidad Operativa ──
-# Costos directos = gastos Tipo='Directo' (COGS, envíos, empaques producto)
-# Gastos estructura = gastos Tipo='Estructura' (equipos, logos, dominios, marketing)
+# ── P&L en dos niveles ────────────────────────────────────────────
 if not df_g_pag.empty and 'Tipo' in df_g_pag.columns:
     costos_directos   = df_g_pag[df_g_pag['Tipo']=='Directo']['Monto Total (USD)'].sum()
     gastos_estructura = df_g_pag[df_g_pag['Tipo']=='Estructura']['Monto Total (USD)'].sum()
@@ -481,17 +314,12 @@ margen_contribucion_pct = (margen_contribucion / total_ingresos * 100) if total_
 utilidad_operativa      = margen_contribucion - gastos_estructura
 utilidad_operativa_pct  = (utilidad_operativa / total_ingresos * 100) if total_ingresos else 0
 
-# Ganancia potencial del inventario — siempre con rentabilidad limpia
-# (accrual: pagado + sin inventario pendiente + sin proyectado)
-# independiente de los toggles, para no distorsionar con gastos futuros
+# ── Ganancia potencial del inventario (accrual limpio) ───────────
 _dg_limpio = df_gastos.copy() if not df_gastos.empty else pd.DataFrame()
 if not _dg_limpio.empty:
     _dg_limpio = _dg_limpio[_dg_limpio['Pagado']]
     if 'En inventario' in _dg_limpio.columns:
         _dg_limpio = _dg_limpio[~_dg_limpio['En inventario']]
-_amz_ing_l   = df_ventas[df_ventas['Canal']=='Amazon']['Total (USD)'].sum() if not df_ventas.empty and 'Cobrado' not in df_ventas.columns else (df_ventas[df_ventas['Cobrado'] & (df_ventas['Canal']=='Amazon')]['Total (USD)'].sum() if not df_ventas.empty else 0)
-_dir_ing_l   = df_ventas[df_ventas['Canal']=='Directo']['Total (USD)'].sum() if not df_ventas.empty and 'Cobrado' not in df_ventas.columns else (df_ventas[df_ventas['Cobrado'] & (df_ventas['Canal']=='Directo')]['Total (USD)'].sum() if not df_ventas.empty else 0)
-# usar ventas cobradas para la rentabilidad limpia
 _dv_cob      = df_ventas[df_ventas['Cobrado']] if not df_ventas.empty and 'Cobrado' in df_ventas.columns else df_ventas
 _amz_ing_l   = _dv_cob[_dv_cob['Canal']=='Amazon']['Total (USD)'].sum()  if not _dv_cob.empty else 0
 _dir_ing_l   = _dv_cob[_dv_cob['Canal']=='Directo']['Total (USD)'].sum() if not _dv_cob.empty else 0
@@ -524,7 +352,6 @@ else:
 
 unidades_amazon  = int(df_v[df_v['Canal']=='Amazon']['Unidades'].sum()) if not df_v.empty else 0
 unidades_directo = int(df_v[df_v['Canal']=='Directo']['Unidades'].sum()) if not df_v.empty else 0
-# mezcla por canal sobre TODAS las ventas (actividad comercial, no caja)
 ventas_tot_all   = df_v['Total (USD)'].sum() if not df_v.empty else 0
 amazon_ing_all   = df_v[df_v['Canal']=='Amazon']['Total (USD)'].sum() if not df_v.empty else 0
 amazon_pct       = (amazon_ing_all / ventas_tot_all * 100) if ventas_tot_all else 0
@@ -556,7 +383,6 @@ with _tg2:
               help="Asume que se cobraron todas las ventas y se pagaron todos los gastos pendientes.")
 
 def dash_table(df):
-    """Renderiza un DataFrame como tabla HTML con estilo del dashboard."""
     return st.write(
         '<div style="overflow-x:auto;">' +
         df.to_html(classes='dash-table', index=False, escape=False, border=0) +
@@ -665,7 +491,7 @@ with k5:
         _k5_val   = inv_mercado_total
         _k5_label = 'Inventario a mercado'
         _k5_sub   = f'Gan. potencial: ${inv_gan_potencial:,.2f} · {inv_uds_total} uds'
-        _k5_badge = f'<span class="kpi-badge badge-amber">Amazon 21.7% · Directo {rentabilidad_directo:.1f}%</span>'
+        _k5_badge = f'<span class="kpi-badge badge-amber">Amazon {rentabilidad_amazon:.1f}% · Directo {rentabilidad_directo:.1f}%</span>'
         _k5_color = AMBER_DARK
         _k5_icon  = '📦'
     st.markdown(f"""
@@ -688,9 +514,7 @@ with _cr:
     con_inversion = st.toggle("📦 Con inversión pendiente", key="canal_inversion",
         help="Activa para incluir costos de inventario comprado pero aún no vendido (envíos, stock en FBA).")
 
-# Recalcular canales según el toggle local
 if con_inversion and not df_g.empty:
-    # incluir también los costos marcados como "En inventario" (pagados pero de stock sin vender)
     _df_g_inv = df_g[df_g['Pagado']] if not proyectado else df_g
     _dg_c = _df_g_inv[(_df_g_inv['Tipo']=='Directo')] if 'Tipo' in _df_g_inv.columns else _df_g_inv
     _pct  = (amazon_ing/(amazon_ing+directo_ing)) if (amazon_ing+directo_ing) else 0.5
@@ -710,17 +534,15 @@ else:
     _gastos_amz_c = gastos_canal_amazon; _gastos_dir_c = gastos_no_amazon
     _modo_label = '✅ Sin inv. pendiente'
 
-# En Proyectado: Amazon incluye venta proyectada del inventario en stock
 if proyectado and not df_inv.empty and 'Canal' in df_inv.columns:
     _amz_inv       = df_inv[df_inv['Canal']=='Amazon']
     _amz_inv_rev   = (_amz_inv['Stock (ajustable)'] * _amz_inv['Precio Mercado (USD)']).sum()
     _fee_pct       = abs(gastos_amazon_total) / amazon_ing if amazon_ing else 0.445
     _amz_inv_fees  = _amz_inv_rev * _fee_pct
-    # costos En inventario (pagados y pendientes) para Amazon
     _dg_einv = df_gastos[df_gastos['En inventario'] & (df_gastos['Canal']=='Amazon')] if not df_gastos.empty and 'En inventario' in df_gastos.columns else pd.DataFrame()
     _amz_inv_costs = _dg_einv['Monto Total (USD)'].sum() if not _dg_einv.empty else 0
     _amz_ing_proy      = amazon_ing + _amz_inv_rev
-    _amz_fees_proy     = gastos_amazon_total - _amz_inv_fees   # negativo
+    _amz_fees_proy     = gastos_amazon_total - _amz_inv_fees
     _amz_gastos_proy   = _gastos_amz_c + _amz_inv_costs
     _neto_amz_proy     = _amz_ing_proy + _amz_fees_proy - _amz_gastos_proy
     _rent_amz_proy     = (_neto_amz_proy / _amz_ing_proy * 100) if _amz_ing_proy else 0
@@ -854,9 +676,8 @@ with g2:
         if cat_col:
             cat_data = df_g[df_g['Monto Total (USD)'] > 0].groupby(cat_col)['Monto Total (USD)'].sum().reset_index()
             cat_data = cat_data.sort_values('Monto Total (USD)', ascending=True)
-            palette = CHART_SEQ
             fig2 = px.bar(cat_data, x='Monto Total (USD)', y=cat_col, orientation='h',
-                          color=cat_col, color_discrete_sequence=palette)
+                          color=cat_col, color_discrete_sequence=CHART_SEQ)
             fig2.update_layout(**PLOTLY_LAYOUT, height=260, showlegend=False,
                                xaxis=dict(gridcolor=CARD_BORDER, zeroline=False),
                                yaxis=dict(gridcolor='rgba(0,0,0,0)'))
@@ -871,7 +692,7 @@ with g3:
     st.markdown('<div class="chart-card"><div class="chart-title">Ingresos por producto (SKU)</div>', unsafe_allow_html=True)
     if not df_v.empty and 'SKU' in df_v.columns:
         prod_data = df_v.groupby('SKU')['Total (USD)'].sum().reset_index().sort_values('Total (USD)', ascending=True)
-        prod_data['SKU'] = prod_data['SKU'].astype(str)  # tratar SKU como categoría, no número
+        prod_data['SKU'] = prod_data['SKU'].astype(str)
         fig3 = px.bar(prod_data, x='Total (USD)', y='SKU', orientation='h',
                       color_discrete_sequence=[AMBER])
         fig3.update_layout(**PLOTLY_LAYOUT, height=240, showlegend=False,
@@ -936,8 +757,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<p class="section-label">Inventario en stock</p>', unsafe_allow_html=True)
 
 if not df_inv.empty:
-    # Ganancia potencial real = valor a mercado × rentabilidad limpia por canal
-    # Usa siempre _ra_limpio/_rd_limpio (accrual, sin proyectado ni inversión pendiente)
     df_inv = df_inv.copy()
     df_inv['Ganancia Potencial (USD)'] = df_inv.apply(
         lambda r: r['Valor a Mercado (USD)'] * (_ra_limpio if r.get('Canal','Directo')=='Amazon' else _rd_limpio),
@@ -981,7 +800,6 @@ if not df_inv.empty:
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Tabla
     st.markdown('<div class="chart-card"><div class="chart-title" style="text-align:center;">Desglose por SKU</div>', unsafe_allow_html=True)
     tbl = df_inv[['SKU','Producto','Stock (ajustable)','Costo Unit. (USD)','Valor en Stock (USD)','Precio Mercado (USD)','Valor a Mercado (USD)','Ganancia Potencial (USD)']].copy()
     max_stock = tbl['Stock (ajustable)'].max() or 1
@@ -1007,7 +825,6 @@ if not df_inv.empty:
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Donut — mismo ancho que la tabla
     st.markdown('<div class="mobile-hidden">', unsafe_allow_html=True)
     st.markdown('<div class="chart-card"><div class="chart-title" style="text-align:center;">Capital por SKU</div><div style="height:16px;"></div>', unsafe_allow_html=True)
     _, dc, _ = st.columns([1, 2, 1])

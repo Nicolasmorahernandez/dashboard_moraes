@@ -1,0 +1,7 @@
+SHEET_FINANZAS_ID = '1ODzs4-V__I5uN5mcbwJrUwIKrDrK6nn-wlii-eKNEhg'
+SHEET_AMAZON_ID   = '1TX0azfGSqKNRhMqKg_VS3iRHx0RMNPWnKGbq3Pwf8cQ'
+
+SKU_MAP = {
+    'BT-CX89-PS3K': '5231',
+    '96-XO2W-I9FY': '432',
+}

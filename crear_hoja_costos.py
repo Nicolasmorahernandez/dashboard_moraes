@@ -1,9 +1,10 @@
 import gspread, pickle, pandas as pd
+from constants import SHEET_FINANZAS_ID
 
 with open('token.pickle','rb') as f:
     creds = pickle.load(f)
 gc = gspread.authorize(creds)
-fin = gc.open_by_key('1ODzs4-V__I5uN5mcbwJrUwIKrDrK6nn-wlii-eKNEhg')
+fin = gc.open_by_key(SHEET_FINANZAS_ID)
 
 try:
     fin.del_worksheet(fin.worksheet('Costos Amazon'))
