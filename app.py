@@ -377,7 +377,11 @@ st.markdown(f"""<div class="dash-header">
 </div>""", unsafe_allow_html=True)
 
 # ── Toggle de escenario ───────────────────────────────────────────
-_tg1, _tg2 = st.columns([3, 1])
+_tg1, _tgb, _tg2 = st.columns([2.2, 0.8, 1])
+with _tgb:
+    if st.button("🔄 Actualizar datos", help="Recarga los datos desde Google Sheets (salta el caché de 5 min)."):
+        st.cache_data.clear()
+        st.rerun()
 with _tg2:
     st.toggle("🔮 Proyectado (todo cobrado y pagado)", key="proy_toggle",
               help="Asume que se cobraron todas las ventas y se pagaron todos los gastos pendientes.")
