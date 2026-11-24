@@ -329,25 +329,32 @@ else:
 
     # Precios por volumen
     st.markdown("")
-    tiers = [('Retail', 'Precio retail', 'Margen retail %'),
-             ('Wholesale 6–24', 'WS 6–24', 'Margen WS 6–24 %'),
-             ('Wholesale 25–49', 'WS 25–49', 'Margen WS 25–49 %'),
-             ('Wholesale 50–99', 'WS 50–99', 'Margen WS 50–99 %')]
-    tarjetas = ''.join(
-        f"<div class='tier'><span>{t}</span><b>{money(r[c])}</b>"
-        f"<em style='color:{color_m(r[m])}'>{pct(r[m])} margen · {money(r[c] - r['Costo variable'], 2)}/und</em></div>"
-        for t, c, m in tiers)
-    corp = ''.join(f"<span>{t} <b>{money(r[c])}</b></span>" for t, c in
-                   [('Corp 12–30', 'Corp 12–30'), ('31–60', 'Corp 31–60'),
-                    ('61–99', 'Corp 61–99'), ('100–200', 'Corp 100–200')])
+    def _tarjetas(tiers):
+        return ''.join(
+            f"<div class='tier'><span>{t}</span><b>{money(r[c])}</b>"
+            f"<em style='color:{color_m(r[m])}'>{pct(r[m])} margen · {money(r[c] - r['Costo variable'], 2)}/und</em></div>"
+            for t, c, m in tiers)
+
+    ws_tiers = [('Retail', 'Precio retail', 'Margen retail %'),
+                ('Wholesale 6–24', 'WS 6–24', 'Margen WS 6–24 %'),
+                ('Wholesale 25–49', 'WS 25–49', 'Margen WS 25–49 %'),
+                ('Wholesale 50–99', 'WS 50–99', 'Margen WS 50–99 %')]
+    corp_tiers = [(f'Corporativo {n}', f'Corp {n}', f'Margen Corp {n} %')
+                  for n in ['12–30', '31–60', '61–99', '100–200']]
     und = r['Und/mes para cubrir fijos']
     fijos = money(p['B16'])
     st.markdown(
-        "<div class='panel'><div class='panel-t'>Precios por volumen</div>"
-        f"<div class='tiers'>{tarjetas}</div>"
-        f"<div class='corp'>{corp}<span>Retail ideal (4× costo) <b>{money(r['Retail ideal (4× costo)'])}</b></span></div>"
-        f"<div class='nota'>Wholesale y corporativo son % del retail (se cambian en Ajustes). "
-        f"{'' if _nan(und) else f'Con este producto a precio WS 6–24 necesitas ~{und:,.0f} und/mes para cubrir {fijos} de fijos.'}</div>"
+        "<div class='panel'><div class='panel-t'>Retail y wholesale</div>"
+        f"<div class='tiers'>{_tarjetas(ws_tiers)}</div>"
+        f"<div class='nota'>Wholesale = {p['B10']:.0%} / {p['B11']:.0%} / {p['B12']:.0%} del retail. "
+        f"{'' if _nan(und) else f'A precio WS 6–24 necesitas ~{und:,.0f} und/mes para cubrir {fijos} de fijos.'}</div>"
+        "</div>", unsafe_allow_html=True)
+    st.markdown("")
+    st.markdown(
+        "<div class='panel'><div class='panel-t'>Corporativo</div>"
+        f"<div class='tiers'>{_tarjetas(corp_tiers)}</div>"
+        f"<div class='nota'>Corporativo = {p['B13']:.0%} / {p['B14']:.0%} / {p['B15']:.0%} / {p['E15']:.0%} del retail "
+        f"(se cambian en Ajustes). Retail ideal (4× costo): <b>{money(r['Retail ideal (4× costo)'])}</b>.</div>"
         "</div>", unsafe_allow_html=True)
 
 

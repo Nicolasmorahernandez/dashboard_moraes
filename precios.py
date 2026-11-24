@@ -191,6 +191,7 @@ def calcular(df_params, df_prod):
     for nombre, celda in [('Corp 12–30', 'B13'), ('Corp 31–60', 'B14'),
                           ('Corp 61–99', 'B15'), ('Corp 100–200', 'E15')]:
         df[nombre] = (precio * p[celda]).map(redondear)
+        df[f'Margen {nombre} %'] = margen(df[nombre])
     df['Retail ideal (4× costo)'] = (costo * 4).map(redondear)
     ganancia_ws = df['WS 6–24'] - costo
     df['Und/mes para cubrir fijos'] = (p['B16'] / ganancia_ws).where(ganancia_ws > 0)
