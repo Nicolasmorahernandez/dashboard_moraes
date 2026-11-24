@@ -33,6 +33,7 @@ SEG = {  # colores del desglose de costo
     'Proveedor': '#7a4a2e', 'Fabricación': '#7a4a2e', 'Ajuste cambiario': '#a0643d', 'Empaque': '#c49a6c',
     'Flete': '#8c7a6b', 'Arancel': '#5e5048', 'Ganancia': '#86c58a',
 }
+CHIP_TALLER = "<span class='chip'>Taller</span>"
 MARGEN_BAJO, MARGEN_OK = 0.20, 0.35   # supuesto: rojo < 20%, dorado < 35%
 
 st.markdown(f"""
@@ -540,7 +541,7 @@ if not producto_sel:
         with cols[i % 3].container(border=True):
             st.markdown(
                 f"<div class='pc-name'>{html.escape(prod)}"
-                f"{'<span class=\'chip\'>Taller</span>' if fab_actual(prod) is not None else ''}</div>"
+                f"{CHIP_TALLER if fab_actual(prod) is not None else ''}</div>"
                 f"<div class='pc-row'>Retail <b>{precio_txt}</b></div>"
                 f"<div class='pc-row'>Margen mínimo <b style='color:{mcol}'>{margen_txt}</b></div>"
                 f"<div class='pc-row'>Cueros <b>{len(g)}</b></div>",
