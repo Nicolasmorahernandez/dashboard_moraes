@@ -338,3 +338,85 @@ def valor_celda_empaque(producto, estado):
     if estado['modo'] == 'componentes':
         return formula_componentes(producto)
     return float(estado['total'])
+
+
+# ── Productos fabricados en el taller ─────────────────────────────
+# Un producto es "fabricado" si tiene filas en la pestaña Fabricación.
+# Su costo (columna C, por cuero) lo calcula la app y lo escribe como número:
+#   (pie² × precio del cuero × (1 + desperdicio) + Σ cantidad × precio material
+#    + minutos/60 × valor hora) × (1 + % taller)
+# Los precios viven en la pestaña Materiales.
+
+HOJA_MATERIALES = 'Materiales'
+CAB_MATERIALES = ['Material', 'Unidad', 'Precio (USD)']
+VALOR_HORA = 'Valor hora (mano de obra)'
+CUEROS = ['Vaqueta', 'Napa', 'Crazy Horse', 'Hampton']
+MATERIALES_BASE = ([(f'Cuero {c}', 'pie²', 0.0) for c in CUEROS]
+                   + [(VALOR_HORA, 'hora', 0.0), ('Hilo', 'm', 0.0), ('Herraje', 'und', 0.0),
+                      ('Forro', 'pie²', 0.0), ('Pegante', 'und', 0.0), ('Tinta de cantos', 'und', 0.0)])
+
+HOJA_FAB = 'Fabricación'
+CAB_FAB = ['Producto', 'Campo', 'Concepto', 'Cantidad']
+FAB_CAMPOS = ('pies2', 'desperdicio', 'minutos', 'taller')
+FAB_DEFAULT = {'pies2': 0.0, 'desperdicio': 0.20, 'minutos': 0.0, 'taller': 0.05, 'items': []}  # % supuestos
+
+
+def nombre_cuero(cuero):
+    return f'Cuero {cuero}'
+
+
+def parsear_materiales(grid):
+    out = []
+    for fila in (grid or [])[1:]:
+        fila = list(fila) + ['', '', '']
+        nombre = str(fila[0]).strip()
+        if not nombre:
+            continue
+        precio = a_numero(fila[2])
+        out.append((nombre, str(fila[1]).strip(), 0.0 if math.isnan(precio) else precio))
+    return out
+
+
+def grid_materiales(materiales):
+    return [CAB_MATERIALES] + [[n, u, float(p)] for n, u, p in materiales]
+
+
+def parsear_fab(grid):
+    out = {}
+    for fila in (grid or [])[1:]:
+        fila = list(fila) + ['', '', '', '']
+        prod, campo, concepto = str(fila[0]).strip(), str(fila[1]).strip().lower(), str(fila[2]).strip()
+        cant = a_numero(fila[3])
+        cant = 0.0 if math.isnan(cant) else cant
+        if not prod or not campo:
+            continue
+        bom = out.setdefault(prod, {**FAB_DEFAULT, 'items': []})
+        if campo in FAB_CAMPOS:
+            bom[campo] = cant
+        elif campo == 'material' and concepto:
+            bom['items'].append((concepto, cant))
+    return out
+
+
+def grid_fab(fab):
+    filas = [CAB_FAB]
+    for prod, bom in fab.items():
+        for campo in FAB_CAMPOS:
+            filas.append([prod, campo, '', float(bom[campo])])
+        for concepto, cant in bom['items']:
+            filas.append([prod, 'material', concepto, float(cant)])
+    return filas
+
+
+def costo_fabricado(bom, cuero, precios):
+    """precios: {material: precio}. Devuelve dict con el desglose y 'total'."""
+    p_cuero = precios.get(nombre_cuero(cuero), 0.0)
+    cuero_usd = bom['pies2'] * p_cuero * (1 + bom['desperdicio'])
+    mats = [(c, q, precios.get(c, 0.0), q * precios.get(c, 0.0)) for c, q in bom['items']]
+    materiales = sum(m[3] for m in mats)
+    mano = bom['minutos'] / 60 * precios.get(VALOR_HORA, 0.0)
+    base = cuero_usd + materiales + mano
+    taller = base * bom['taller']
+    return {'cuero': cuero_usd, 'precio_cuero': p_cuero, 'materiales': materiales, 'detalle_mat': mats,
+            'mano': mano, 'valor_hora': precios.get(VALOR_HORA, 0.0), 'taller': taller,
+            'total': base + taller}

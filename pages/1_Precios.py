@@ -30,7 +30,7 @@ BG, CARD, LINE = '#14100e', '#1d1714', '#30251f'
 INK, MUTED, FAINT = '#f3ebe4', '#a38d7e', '#6f5d52'
 COGNAC, GOLD, GREEN, RED = '#c27c4a', '#d9a441', '#86c58a', '#e07a6e'
 SEG = {  # colores del desglose de costo
-    'Proveedor': '#7a4a2e', 'Ajuste cambiario': '#a0643d', 'Empaque': '#c49a6c',
+    'Proveedor': '#7a4a2e', 'Fabricación': '#7a4a2e', 'Ajuste cambiario': '#a0643d', 'Empaque': '#c49a6c',
     'Flete': '#8c7a6b', 'Arancel': '#5e5048', 'Ganancia': '#86c58a',
 }
 MARGEN_BAJO, MARGEN_OK = 0.20, 0.35   # supuesto: rojo < 20%, dorado < 35%
@@ -86,6 +86,8 @@ button[data-testid^="stBaseButton-secondary"]:hover, .stPopover button:hover {{ 
 .nota {{ font-size:.76rem; color:{FAINT}; margin-top:.5rem; }}
 .pend {{ font-size:.82rem; color:{GOLD}; }}
 .ln.sub {{ padding:.25rem 0 .25rem 1.35rem; font-size:.8rem; color:{MUTED}; border-bottom:1px dashed {LINE}; }}
+.chip {{ display:inline-block; font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:{GOLD}; border:1px solid {LINE}; border-radius:999px; padding:.1rem .55rem; margin-left:.4rem; vertical-align:middle; }}
+.aviso {{ font-size:.78rem; color:{GOLD}; margin:.35rem 0; }}
 .emp-t {{ font-size:.78rem; letter-spacing:.04em; color:{MUTED}; margin:.9rem 0 .35rem; }}
 @media (max-width: 760px) {{
   .tiers {{ grid-template-columns:repeat(2,1fr); }}
@@ -108,13 +110,17 @@ def _hoja():
     return gc, sh.worksheet(P.HOJA)
 
 
-def _leer_empaque(sh):
-    """Grid de la pestaña Empaque, o None si no existe todavía."""
+def _leer_tab(sh, nombre):
+    """Grid de una pestaña auxiliar, o None si no existe todavía."""
     try:
-        ws = sh.worksheet(P.HOJA_EMPAQUE)
+        ws = sh.worksheet(nombre)
     except WorksheetNotFound:
         return None
     return [list(f) for f in ws.get_all_values(value_render_option=ValueRenderOption.unformatted)]
+
+
+def _leer_empaque(sh):
+    return _leer_tab(sh, P.HOJA_EMPAQUE)
 
 
 def _leer_grids(ws):
@@ -130,6 +136,8 @@ def cargar():
         ws = sh.worksheet(P.HOJA)
         valores, formulas = _leer_grids(ws)
         grid_emp = _leer_empaque(sh)
+        grid_mat = _leer_tab(sh, P.HOJA_MATERIALES)
+        grid_fab = _leer_tab(sh, P.HOJA_FAB)
     except (APIError, SpreadsheetNotFound, PermissionError) as e:
         email = None
         try:
@@ -145,8 +153,15 @@ def cargar():
     st.session_state['emp_raw'] = grid_emp
     st.session_state['emp_orig'] = P.estado_empaque(prod, componentes)
     st.session_state['emp_componentes'] = componentes
+    st.session_state['M_raw'] = grid_mat
+    st.session_state['M_orig'] = P.parsear_materiales(grid_mat) if grid_mat is not None else list(P.MATERIALES_BASE)
+    st.session_state['F_raw'] = grid_fab
+    st.session_state['F_orig'] = P.parsear_fab(grid_fab)
     st.session_state['pend'] = {}
     st.session_state['pend_emp'] = {}
+    st.session_state['pend_fab'] = {}
+    st.session_state['pend_mat'] = None
+    st.session_state['carga'] = st.session_state.get('carga', 0) + 1
 
 
 if 'precios_orig' not in st.session_state:
@@ -186,11 +201,59 @@ for _prod, _est in emp_orig.items():
         _m = prod_nuevo['Producto'] == _prod
         prod_nuevo.loc[_m, 'Empaque'] = P.empaque_efectivo(_est, _b7)
         prod_nuevo.loc[_m, '_f_E'] = ''
+M_orig = st.session_state['M_orig']
+F_orig = st.session_state['F_orig']
+pend_fab = st.session_state.setdefault('pend_fab', {})   # {producto: bom nuevo, o None = vuelve a proveedor}
+
+
+def _mat_igual(a, b):
+    return [(n, u, round(float(x), 6)) for n, u, x in a] == [(n, u, round(float(x), 6)) for n, u, x in b]
+
+
+def _fab_igual(a, b):
+    if a is None or b is None:
+        return a is b
+    return (all(abs(a[k] - b[k]) < 1e-9 for k in P.FAB_CAMPOS)
+            and [(c, round(q, 6)) for c, q in a['items']] == [(c, round(q, 6)) for c, q in b['items']])
+
+
+if st.session_state.get('pend_mat') is not None and _mat_igual(st.session_state['pend_mat'], M_orig):
+    st.session_state['pend_mat'] = None
+for _prod in list(pend_fab):
+    if _fab_igual(pend_fab[_prod], F_orig.get(_prod)):
+        del pend_fab[_prod]
+
+
+def mat_actual():
+    return st.session_state.get('pend_mat') or M_orig
+
+
+def fab_actual(prod):
+    return pend_fab[prod] if prod in pend_fab else F_orig.get(prod)
+
+
+precios_mat = {n: x for n, _, x in mat_actual()}
+desglose_fab = {}   # fila -> desglose del costo fabricado
+for _i, _r in prod_nuevo.iterrows():
+    _bom = fab_actual(_r['Producto'])
+    if _bom is not None:
+        _d = P.costo_fabricado(_bom, _r['Cuero'], precios_mat)
+        desglose_fab[int(_r['Fila'])] = _d
+        prod_nuevo.at[_i, 'Costo proveedor'] = _d['total']
+        prod_nuevo.at[_i, '_f_C'] = ''
 df = P.calcular(params_nuevo, prod_nuevo)
 p = dict(zip(params_nuevo['Celda'], params_nuevo['Valor']))
 # El empaque de productos va por su propio camino (modos); se excluye del diff genérico
+_filas_fab = {f'C{f}' for f in desglose_fab}
 cambios = [c for c in P.cambios_pendientes(params_orig, params_nuevo, prod_orig, prod_nuevo)
-           if not (c['celda'][0] == 'E' and int(c['celda'][1:]) >= P.FILA_INICIO)]
+           if not (c['celda'][0] == 'E' and int(c['celda'][1:]) >= P.FILA_INICIO)
+           and c['celda'] not in _filas_fab]
+for _prod, _bom in pend_fab.items():
+    cambios.append({'celda': 'C', 'que': f"{_prod} · {'fabricado por mí' if _bom is not None else 'comprado al proveedor'}",
+                    'antes': math.nan, 'despues': math.nan, 'bloqueada': False, 'fab': _prod})
+if st.session_state.get('pend_mat') is not None:
+    cambios.append({'celda': 'M', 'que': 'Precios de materiales', 'antes': math.nan, 'despues': math.nan,
+                    'bloqueada': False, 'materiales': True})
 NOMBRE_MODO = {'default': 'predeterminado', 'manual': 'total manual', 'componentes': 'por componentes'}
 
 
@@ -257,11 +320,17 @@ def entrada(celda, label, valor, bloqueada=False, fmt='%.2f', step=0.5, min_valu
                     help=ayuda or (f"Celda {celda}" + (" · tiene fórmula en el Sheet, se cambia allá" if bloqueada else "")))
 
 
-def ir(producto):
-    st.session_state['producto'] = producto
-    for k in [k for k in st.session_state if k.startswith('emp_')
+def _limpiar_widgets(solo_ficha=False):
+    """Borra el estado de los widgets para que vuelvan a leer los valores actuales."""
+    prefijos = ('emp_', 'fab_') if solo_ficha else ('in_', 'emp_', 'fab_', 'mat_')
+    for k in [k for k in st.session_state if k.startswith(prefijos)
               and k not in ('emp_orig', 'emp_raw', 'emp_componentes')]:
         del st.session_state[k]
+
+
+def ir(producto):
+    st.session_state['producto'] = producto
+    _limpiar_widgets(solo_ficha=True)
     st.session_state['visita'] = st.session_state.get('visita', 0) + 1
 
 
@@ -317,10 +386,100 @@ def bloque_empaque(prod):
         st.rerun()
 
 
+def _set_pend_fab(prod, nuevo):
+    """Registra el bom nuevo (None = proveedor) y recarga si cambió."""
+    orig = F_orig.get(prod)
+    if _fab_igual(nuevo, orig):
+        if prod in pend_fab:
+            del pend_fab[prod]
+            st.rerun()
+    elif prod not in pend_fab or not _fab_igual(nuevo, pend_fab[prod]):
+        pend_fab[prod] = nuevo
+        st.rerun()
+
+
+def bloque_origen(prod, filas_prod, o, fila):
+    """Proveedor (costo C editable) o fabricado por mí (hoja de costos)."""
+    actual = fab_actual(prod)
+    c_con_formula = bool((filas_prod['_f_C'] != '').any()) and actual is None and prod not in F_orig
+    opciones = {'prov': 'Proveedor', 'fab': 'Fabricado por mí'}
+    if c_con_formula:
+        origen = 'prov'
+    else:
+        origen = st.segmented_control("Origen del producto", list(opciones), format_func=opciones.get,
+                                      default='fab' if actual is not None else 'prov',
+                                      key=f'fab_origen_{prod}', label_visibility='collapsed') \
+            or ('fab' if actual is not None else 'prov')
+    if origen == 'prov':
+        entrada(f'C{fila}', 'Costo proveedor (USD, a tasa base)', o['Costo proveedor'], bool(o['_f_C']))
+        if c_con_formula:
+            st.markdown("<div class='nota'>El costo tiene fórmula en el Sheet, así que no se puede "
+                        "pasar a fabricado desde aquí.</div>", unsafe_allow_html=True)
+        _set_pend_fab(prod, None)
+        return
+    # Al pasar a fabricado se descartan ediciones manuales del costo
+    for f_ in filas_prod['Fila']:
+        pend.pop(f'C{int(f_)}', None)
+        st.session_state.pop(f'in_C{int(f_)}', None)
+    bloque_fabricacion(prod, actual or {**P.FAB_DEFAULT, 'items': []})
+
+
+def bloque_fabricacion(prod, bom):
+    st.markdown("<div class='emp-t'>Hoja de costos (aplica a todos los cueros)</div>", unsafe_allow_html=True)
+    a, b = st.columns(2)
+    pies2 = a.number_input("Cuero (pie²)", value=float(bom['pies2']), min_value=0.0, step=0.1, format='%.2f',
+                           key=f'fab_pies_{prod}', help="Pies² que gasta una unidad, sin contar desperdicio")
+    desp = b.number_input("Desperdicio %", value=float(bom['desperdicio']) * 100, min_value=0.0, max_value=200.0,
+                          step=1.0, format='%.0f', key=f'fab_desp_{prod}',
+                          help="Recortes que se pierden al cortar. 20% es un supuesto inicial")
+    minutos = a.number_input("Mano de obra (min)", value=float(bom['minutos']), min_value=0.0, step=5.0,
+                             format='%.0f', key=f'fab_min_{prod}', help="Minutos por unidad: corte, costura, cantos")
+    taller = b.number_input("Taller %", value=float(bom['taller']) * 100, min_value=0.0, max_value=100.0,
+                            step=1.0, format='%.0f', key=f'fab_taller_{prod}',
+                            help="Gastos del taller (luz, herramienta, cuchillas) sobre el costo. 5% es un supuesto")
+    nombres = [n for n, _, _ in mat_actual()
+               if n != P.VALOR_HORA and n not in {P.nombre_cuero(c) for c in P.CUEROS}]
+    clave_base = f'fab_base_{prod}'
+    if clave_base not in st.session_state:
+        items = bom['items'] or [(n, 0.0) for n in ('Hilo', 'Herraje') if n in nombres]
+        st.session_state[clave_base] = pd.DataFrame(items, columns=['Material', 'Cantidad'])
+    tabla = st.data_editor(
+        st.session_state[clave_base], key=f"fab_items_{prod}_{st.session_state.get('visita', 0)}",
+        num_rows='dynamic', hide_index=True, width='stretch',
+        column_config={'Material': st.column_config.SelectboxColumn(options=nombres, required=True),
+                       'Cantidad': st.column_config.NumberColumn(min_value=0.0, format='%.2f')})
+    items = [(str(c), float(q) if not _nan(q) else 0.0)
+             for c, q in zip(tabla['Material'], tabla['Cantidad']) if c is not None and str(c).strip()]
+    st.markdown("<div class='nota'>Cantidad por unidad, en la unidad de cada material (m de hilo, und de "
+                "herraje…). Los precios y nuevos materiales se ponen en <b>Materiales</b>, arriba.</div>",
+                unsafe_allow_html=True)
+    nuevo = {'pies2': float(pies2 or 0), 'desperdicio': float(desp or 0) / 100, 'minutos': float(minutos or 0),
+             'taller': float(taller or 0) / 100, 'items': items}
+    _set_pend_fab(prod, nuevo)
+
+
+def _aplicar_delta(base, delta):
+    """Aplica los cambios de un st.data_editor (edited/added/deleted rows) a su DataFrame base."""
+    out = base.copy()
+    for i, cambios_fila in (delta.get('edited_rows') or {}).items():
+        for col, v in cambios_fila.items():
+            out.at[int(i), col] = v
+    out = out.drop(index=[int(i) for i in (delta.get('deleted_rows') or [])])
+    nuevas = pd.DataFrame(delta.get('added_rows') or [], columns=out.columns)
+    return pd.concat([out, nuevas], ignore_index=True) if len(nuevas) else out.reset_index(drop=True)
+
+
+def _on_materiales():
+    tabla = _aplicar_delta(st.session_state['mat_base'], st.session_state['mat_ed'])
+    lista = [(str(n).strip(), '' if _nan(u) or u is None else str(u).strip(), 0.0 if _nan(x) else float(x))
+             for n, u, x in tabla.itertuples(index=False) if n is not None and not _nan(n) and str(n).strip()]
+    st.session_state['pend_mat'] = None if _mat_igual(lista, M_orig) else lista
+
+
 # ── Encabezado ────────────────────────────────────────────────────
 producto_sel = st.session_state.get('producto')
 
-h1, h2 = st.columns([3, 1.3], vertical_alignment='bottom')
+h1, h2 = st.columns([2.3, 2], vertical_alignment='bottom')
 with h1:
     st.markdown("<p class='eyebrow'>MORAES · Precios</p>", unsafe_allow_html=True)
     if producto_sel:
@@ -331,7 +490,19 @@ with h1:
                     f"Conectado a <a href='{URL_SHEET}' target='_blank'>MORAES_precios_ok</a>.</p>",
                     unsafe_allow_html=True)
 with h2:
-    b1, b2 = st.columns(2)
+    b0, b1, b2 = st.columns(3)
+    with b0.popover("Materiales", width='stretch'):
+        st.markdown("**Precios de materiales**")
+        st.caption("Para productos fabricados por ti. Cuero por pie², mano de obra por hora, el resto por "
+                   "su unidad. En USD a la tasa base, igual que el costo proveedor: el ajuste cambiario "
+                   "se suma encima. Agrega materiales con el + de la tabla.")
+        st.session_state.setdefault('mat_base', pd.DataFrame(mat_actual(), columns=P.CAB_MATERIALES))
+        st.data_editor(st.session_state['mat_base'], key='mat_ed', num_rows='dynamic', hide_index=True,
+                       width='stretch', on_change=_on_materiales,
+                       column_config={'Material': st.column_config.TextColumn(required=True),
+                                      'Precio (USD)': st.column_config.NumberColumn(min_value=0.0, format='$%.2f')})
+        if st.session_state['M_raw'] is None:
+            st.caption("La pestaña Materiales se crea en el Sheet la primera vez que guardes.")
     with b1.popover("Ajustes", width='stretch'):
         st.markdown("**Ajustes generales**")
         st.caption("Aplican a todos los productos.")
@@ -341,8 +512,7 @@ with h2:
                     fmt='%.2f' if es_pct else ('%.0f' if r['Valor'] >= 100 else '%.2f'),
                     step=0.01 if es_pct else (50.0 if r['Valor'] >= 100 else 0.5))
     if b2.button("Recargar", width='stretch', help="Descarta cambios sin guardar y vuelve a leer la hoja"):
-        for k in [k for k in st.session_state if k.startswith('in_')]:
-            del st.session_state[k]
+        _limpiar_widgets()
         cargar()
         st.rerun()
 
@@ -369,7 +539,8 @@ if not producto_sel:
             margen_txt, mcol = pct(m), color_m(m)
         with cols[i % 3].container(border=True):
             st.markdown(
-                f"<div class='pc-name'>{html.escape(prod)}</div>"
+                f"<div class='pc-name'>{html.escape(prod)}"
+                f"{'<span class=\'chip\'>Taller</span>' if fab_actual(prod) is not None else ''}</div>"
                 f"<div class='pc-row'>Retail <b>{precio_txt}</b></div>"
                 f"<div class='pc-row'>Margen mínimo <b style='color:{mcol}'>{margen_txt}</b></div>"
                 f"<div class='pc-row'>Cueros <b>{len(g)}</b></div>",
@@ -400,13 +571,25 @@ else:
     # Entradas editables
     with izq:
         st.markdown(f"<div class='panel-t'>Editar · {html.escape(cuero)}</div>", unsafe_allow_html=True)
-        entrada(f'C{fila}', 'Costo proveedor (USD, a tasa base)', o['Costo proveedor'], bool(o['_f_C']))
+        bloque_origen(producto_sel, prod_orig[prod_orig['Producto'] == producto_sel], o, fila)
         entrada(f'J{fila}', 'Precio retail (USD)', o['Precio retail'], bool(o['_f_J']), fmt='%.0f', step=1.0)
         entrada(f'F{fila}', 'Unidades por caja', o['Unid/caja'], bool(o['_f_F']), fmt='%.0f', step=1.0, min_value=1.0)
         if o['_f_J']:
             st.markdown("<div class='nota'>El precio de este cuero tiene fórmula en el Sheet; se cambia allá.</div>",
                         unsafe_allow_html=True)
         bloque_empaque(producto_sel)
+        if fila in desglose_fab:
+            _d = desglose_fab[fila]
+            if _d['precio_cuero'] == 0:
+                st.markdown(f"<div class='aviso'>Falta el precio del cuero {html.escape(cuero)} por pie² en "
+                            "<b>Materiales</b>.</div>", unsafe_allow_html=True)
+            if _d['valor_hora'] == 0 and fab_actual(producto_sel)['minutos'] > 0:
+                st.markdown("<div class='aviso'>Falta el valor hora de mano de obra en <b>Materiales</b>.</div>",
+                            unsafe_allow_html=True)
+            _sin = [c for c, q, x, _ in _d['detalle_mat'] if q > 0 and x == 0]
+            if _sin:
+                st.markdown(f"<div class='aviso'>Sin precio en Materiales: {html.escape(', '.join(_sin))}.</div>",
+                            unsafe_allow_html=True)
 
     # Desglose
     with der:
@@ -422,8 +605,9 @@ else:
             "</div>")
         cabecera = _cab
 
+        _dfab = desglose_fab.get(fila)
         partes = [
-            ('Proveedor', r['Costo proveedor'], ''),
+            ('Fabricación' if _dfab else 'Proveedor', r['Costo proveedor'], 'hecho por ti' if _dfab else ''),
             ('Ajuste cambiario', r['Costo + FX'] - r['Costo proveedor'],
              f"tasa {p['B4']:,.0f} ÷ {p['B5']:,.0f}"),
             ('Empaque', r['Empaque'], ''),
@@ -445,6 +629,15 @@ else:
         for n, v, nota in partes:
             lineas += (f"<div class='ln'><span><i style='background:{SEG[n]}'></i>{n}"
                        f"{f'<small>{nota}</small>' if nota else ''}</span><span>{money(v, 2)}</span></div>")
+            if n == 'Fabricación':
+                _bom = fab_actual(producto_sel)
+                _sub = [(f"Cuero · {_bom['pies2']:g} pie² × {money(_dfab['precio_cuero'], 2)} + {_bom['desperdicio']:.0%}",
+                         _dfab['cuero'])]
+                _sub += [(f"{c} · {q:g} × {money(x, 2)}", s_) for c, q, x, s_ in _dfab['detalle_mat']]
+                _sub += [(f"Mano de obra · {_bom['minutos']:g} min × {money(_dfab['valor_hora'], 2)}/h", _dfab['mano']),
+                         (f"Taller · {_bom['taller']:.0%}", _dfab['taller'])]
+                lineas += ''.join(f"<div class='ln sub'><span>{html.escape(t)}</span><span>{money(x, 2)}</span></div>"
+                                  for t, x in _sub)
             if n == 'Empaque' and _est['modo'] == 'componentes':
                 lineas += ''.join(f"<div class='ln sub'><span>{html.escape(c)}</span><span>{money(x, 2)}</span></div>"
                                   for c, x in _est['items'])
@@ -486,16 +679,11 @@ else:
 
 # ── Barra de guardado (solo si hay cambios) ───────────────────────
 
-def _limpiar_widgets():
-    for k in [k for k in st.session_state if k.startswith('in_') or
-              (k.startswith('emp_') and k not in ('emp_orig', 'emp_raw', 'emp_componentes'))]:
-        del st.session_state[k]
-
-
 def _escrituras():
-    """(celdas para Modelo, grid nuevo para la pestaña Empaque o None si no cambia)."""
+    """(celdas para Modelo, {pestaña auxiliar: grid nuevo} solo las que cambian)."""
+    _especiales = {'empaque', 'fab', 'materiales'}
     datos = [{'range': d['range'], 'values': [[float(v) if v != '' else '' for v in d['values'][0]]]}
-             for d in P.payload_escritura([c for c in cambios if 'empaque' not in c])]
+             for d in P.payload_escritura([c for c in cambios if not (_especiales & c.keys())])]
     componentes = {k: list(v) for k, v in st.session_state['emp_componentes'].items()}
     for prod, est in pend_emp.items():
         valor = P.valor_celda_empaque(prod, est)
@@ -505,10 +693,22 @@ def _escrituras():
             componentes[prod] = est['items']
         else:
             componentes.pop(prod, None)
-    grid = None
+    grids = {}
     if componentes != st.session_state['emp_componentes']:
-        grid = P.grid_empaque(componentes)
-    return datos, grid
+        grids[P.HOJA_EMPAQUE] = P.grid_empaque(componentes)
+    # Fabricados: C se escribe como número calculado
+    filas_c = set(desglose_fab) if st.session_state.get('pend_mat') is not None else set()
+    for prod, bom in pend_fab.items():
+        if bom is not None:
+            filas_c |= {int(f_) for f_ in prod_orig.loc[prod_orig['Producto'] == prod, 'Fila']}
+    for f_ in sorted(filas_c):
+        datos.append({'range': f'C{f_}', 'values': [[round(float(desglose_fab[f_]['total']), 4)]]})
+    nuevo_fab = {k: v for k, v in {**F_orig, **pend_fab}.items() if v is not None}
+    if pend_fab:
+        grids[P.HOJA_FAB] = P.grid_fab(nuevo_fab)
+    if st.session_state.get('pend_mat') is not None or (st.session_state['M_raw'] is None and nuevo_fab):
+        grids[P.HOJA_MATERIALES] = P.grid_materiales(mat_actual())
+    return datos, grids
 
 
 def _conflictos(sh, ws, datos):
@@ -516,9 +716,10 @@ def _conflictos(sh, ws, datos):
     vals_orig = {}
     for _, r_ in prod_orig.iterrows():
         vals_orig[f"E{int(r_['Fila'])}"] = (r_['_f_E'], r_['Empaque'])
+        vals_orig[f"C{int(r_['Fila'])}"] = (r_['_f_C'], r_['Costo proveedor'])
     out = []
     for c in cambios:
-        if 'empaque' in c or c['bloqueada']:
+        if {'empaque', 'fab', 'materiales'} & c.keys() or c['bloqueada']:
             continue
         f_, col_ = P.celda_a_rc(c['celda'])
         if P.es_formula(P._get(formulas_ahora, f_, col_)):
@@ -532,22 +733,25 @@ def _conflictos(sh, ws, datos):
             frm_ahora = P._get(formulas_ahora, f_, col_)
             frm_ahora = frm_ahora if P.es_formula(frm_ahora) else ''
             if frm_ahora != frm or (not frm and P._distinto(P.a_numero(P._get(valores_ahora, f_, col_)), val)):
-                out.append(f"{d['range']} (empaque) cambió en el Sheet")
-    if _leer_empaque(sh) != st.session_state['emp_raw']:
-        out.append("la pestaña Empaque cambió en el Sheet")
-    return out
+                out.append(f"{d['range']} cambió en el Sheet")
+    for nombre, clave_raw in ((P.HOJA_EMPAQUE, 'emp_raw'), (P.HOJA_MATERIALES, 'M_raw'), (P.HOJA_FAB, 'F_raw')):
+        if _leer_tab(sh, nombre) != st.session_state[clave_raw]:
+            out.append(f"la pestaña {nombre} cambió en el Sheet")
+    return list(dict.fromkeys(out))
 
 
 if cambios:
     st.markdown("<hr class='rule'>", unsafe_allow_html=True)
-    datos, grid_emp_nuevo = _escrituras()
+    datos, grids_nuevos = _escrituras()
     s1, s2, s3 = st.columns([2.2, 1, 1], vertical_alignment='center')
     with s1:
         def _fmt(c):
             if 'empaque' in c:
                 return f"{c['que']}: {money(c['antes'], 2)} → {money(c['despues'], 2)} ({c['nota']})"
+            if 'fab' in c or 'materiales' in c:
+                return c['que']
             return f"{c['que']}: {c['antes']:g} → {c['despues']:g}"
-        detalle = ' · '.join(_fmt(c) for c in cambios[:3] if not (_nan(c['antes']) and _nan(c['despues'])))
+        detalle = ' · '.join(_fmt(c) for c in cambios[:3])
         st.markdown(f"<span class='pend'>● {len(cambios)} cambio(s) sin guardar</span>"
                     f"<div class='nota'>{html.escape(detalle)}{' …' if len(cambios) > 3 else ''}</div>",
                     unsafe_allow_html=True)
@@ -558,9 +762,11 @@ if cambios:
         _limpiar_widgets()
         pend.clear()
         pend_emp.clear()
+        pend_fab.clear()
+        st.session_state['pend_mat'] = None
         st.rerun()
     if s2.button("Guardar en Sheets", type="primary", width='stretch',
-                 disabled=not (datos or grid_emp_nuevo) or not autorizado):
+                 disabled=not (datos or grids_nuevos) or not autorizado):
         try:
             _, sh = _libro()
             ws = sh.worksheet(P.HOJA)
@@ -569,13 +775,14 @@ if cambios:
                 st.error("No guardé nada porque la hoja cambió mientras editabas: "
                          + "; ".join(conflictos) + ". Presiona *Recargar*.")
             else:
-                if grid_emp_nuevo is not None:   # primero el detalle, luego las fórmulas que lo usan
+                # primero las pestañas auxiliares (Empaque tiene fórmulas que la usan), luego Modelo
+                for nombre, grid in grids_nuevos.items():
                     try:
-                        ws_emp = sh.worksheet(P.HOJA_EMPAQUE)
+                        ws_aux = sh.worksheet(nombre)
                     except WorksheetNotFound:
-                        ws_emp = sh.add_worksheet(P.HOJA_EMPAQUE, rows=200, cols=3)
-                    ws_emp.clear()
-                    ws_emp.update(grid_emp_nuevo, 'A1', value_input_option='RAW')
+                        ws_aux = sh.add_worksheet(nombre, rows=max(200, len(grid) + 50), cols=len(grid[0]))
+                    ws_aux.clear()
+                    ws_aux.update(grid, 'A1', value_input_option='RAW')
                 if datos:
                     ws.batch_update(datos, value_input_option='USER_ENTERED')
                 _limpiar_widgets()
