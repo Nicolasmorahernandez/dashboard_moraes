@@ -268,8 +268,15 @@ def _ubicar_nuevos():
     return out
 
 
+def _cueros_nv(nv):
+    """Cueros del producto nuevo; si es fabricado, el costo se recalcula con los precios de materiales."""
+    if not nv.get('bom'):
+        return nv['cueros']
+    return [(c, P.costo_fabricado(nv['bom'], c, precios_mat)['total'], pr) for c, _, pr in nv['cueros']]
+
+
 df_nuevos = pd.concat(
-    [P.calcular(params_nuevo, P.df_producto_nuevo(nv['nombre'], nv['unid'], nv['cueros'], f0, p['B7']))
+    [P.calcular(params_nuevo, P.df_producto_nuevo(nv['nombre'], nv['unid'], _cueros_nv(nv), f0, p['B7']))
      for nv, f0 in _ubicar_nuevos()], ignore_index=True) if pend_nuevos else None
 # El empaque de productos va por su propio camino (modos); se excluye del diff genérico
 _filas_fab = {f'C{f}' for f in desglose_fab}
@@ -534,6 +541,58 @@ def tabla_precios_html(d):
     return f"<table class='np'><tr><th></th>{cab}</tr>{filas}</table>"
 
 
+def hoja_costos_nuevo(idx, bom, cueros):
+    """Hoja de costos de un producto fabricado, con los precios de materiales ahí mismo.
+    Devuelve (bom, catálogo de materiales actualizado)."""
+    k = f'np_{idx}'
+    catalogo = {n: (u, x) for n, u, x in mat_actual()}
+    st.markdown("<div class='emp-t'>Hoja de costos por unidad (aplica a todos los cueros)</div>",
+                unsafe_allow_html=True)
+    a, b, c_, d = st.columns(4)
+    pies2 = a.number_input("Cuero (pie²)", value=float(bom['pies2']), min_value=0.0, step=0.1, format='%.2f',
+                           key=f'{k}_pies', help="Pies² que gasta una unidad, sin contar desperdicio")
+    desp = b.number_input("Desperdicio %", value=float(bom['desperdicio']) * 100, min_value=0.0, max_value=200.0,
+                          step=1.0, format='%.0f', key=f'{k}_desp', help="20% es un supuesto inicial")
+    minutos = c_.number_input("Mano de obra (min)", value=float(bom['minutos']), min_value=0.0, step=5.0,
+                              format='%.0f', key=f'{k}_min', help="Minutos por unidad: corte, costura, cantos")
+    taller = d.number_input("Taller %", value=float(bom['taller']) * 100, min_value=0.0, max_value=100.0,
+                            step=1.0, format='%.0f', key=f'{k}_taller',
+                            help="Luz, herramienta, cuchillas, sobre el costo. 5% es un supuesto")
+    excluir = {P.VALOR_HORA} | {P.nombre_cuero(c) for c in P.CUEROS}
+    opciones = [n for n in catalogo if n not in excluir]
+    previos = [cn for cn, _ in bom['items']]
+    sel = st.multiselect("Materiales (herrajes, hilo, forro…)", opciones + [x for x in previos if x not in opciones],
+                         default=previos or [x for x in ('Hilo', 'Herraje') if x in opciones],
+                         accept_new_options=True, key=f'{k}_mats',
+                         placeholder="Elige o escribe uno nuevo")
+    cant_prev = dict(bom['items'])
+    st.markdown("<div class='emp-t'>Precios (se guardan en la pestaña Materiales y sirven para otros productos)</div>",
+                unsafe_allow_html=True)
+    items, nuevos_precios = [], {}
+    fijos = [(P.nombre_cuero(c), 'pie²', f"Cuero {c} (USD/pie²)") for c in cueros] + \
+        [(P.VALOR_HORA, 'hora', "Mano de obra (USD/hora)")]
+    for col_, (nombre_m, unidad, etiqueta) in zip(st.columns(4 if len(fijos) > 2 else len(fijos)) * 2, fijos):
+        precio = col_.number_input(etiqueta, value=float(catalogo.get(nombre_m, (unidad, 0.0))[1]),
+                                   min_value=0.0, step=0.5, format='%.2f', key=f'{k}_p_{nombre_m}')
+        nuevos_precios[nombre_m] = (unidad, float(precio or 0))
+    for n0 in range(0, len(sel), 2):
+        cols_ = st.columns(4)
+        for t, m in enumerate(sel[n0:n0 + 2]):
+            unidad = catalogo.get(m, ('und', 0.0))[0] or 'und'
+            q = cols_[2 * t].number_input(f"{m}: cantidad ({unidad})", value=float(cant_prev.get(m, 0.0)),
+                                          min_value=0.0, step=0.5, format='%.2f', key=f'{k}_q_{m}')
+            precio = cols_[2 * t + 1].number_input(f"{m}: USD por {unidad}",
+                                                   value=float(catalogo.get(m, (unidad, 0.0))[1]),
+                                                   min_value=0.0, step=0.5, format='%.2f', key=f'{k}_p_{m}')
+            items.append((m, float(q or 0)))
+            nuevos_precios[m] = (unidad, float(precio or 0))
+    lista = [(n, nuevos_precios.get(n, (u, x))[0], nuevos_precios.get(n, (u, x))[1]) for n, (u, x) in catalogo.items()]
+    lista += [(n, u, x) for n, (u, x) in nuevos_precios.items() if n not in catalogo]
+    bom = {'pies2': float(pies2 or 0), 'desperdicio': float(desp or 0) / 100, 'minutos': float(minutos or 0),
+           'taller': float(taller or 0) / 100, 'items': items}
+    return bom, lista
+
+
 @st.dialog("Nuevo producto", width='large')
 def dialogo_nuevo(idx=None):
     """Crear (o editar, si idx) un producto nuevo sin guardar: costos primero, precio por margen."""
@@ -544,11 +603,16 @@ def dialogo_nuevo(idx=None):
     unid = b.number_input("Unidades por caja", value=float(previo['unid']) if previo else 30.0,
                           min_value=1.0, step=1.0, format='%.0f', help="Para repartir el flete por unidad")
     costos_prev = {c: q for c, q, _ in previo['cueros']} if previo else {}
+    bom_prev = (previo or {}).get('bom')
+    origen = st.segmented_control("¿Quién lo hace?", ['prov', 'fab'],
+                                  format_func={'prov': 'Lo compro al proveedor', 'fab': 'Lo fabrico yo'}.get,
+                                  default='fab' if bom_prev else 'prov', key=f'np_origen_{idx}') \
+        or ('fab' if bom_prev else 'prov')
     cueros = st.pills("Cueros", list(P.MULT_CUERO), selection_mode='multi',
                       default=list(costos_prev) if previo else ['Vaqueta'], key=f'np_cueros_{idx}') or []
     cueros = [c for c in P.MULT_CUERO if c in cueros]
-    costos = []
-    if cueros:
+    costos, bom, mats_nuevos = [], None, None
+    if cueros and origen == 'prov':
         st.markdown("<div class='emp-t'>Costo del proveedor por unidad (USD, a la tasa base)</div>",
                     unsafe_allow_html=True)
         cols_ = st.columns(len(cueros))
@@ -556,6 +620,12 @@ def dialogo_nuevo(idx=None):
             q = col_.number_input(c, value=costos_prev.get(c), min_value=0.0, step=0.5, format='%.2f',
                                   placeholder='0.00', key=f'np_costo_{idx}_{c}')
             costos.append((c, q))
+    elif cueros:
+        bom, mats_nuevos = hoja_costos_nuevo(idx, bom_prev or {**P.FAB_DEFAULT, 'items': []}, cueros)
+        precios_ = {n: x for n, _, x in mats_nuevos}
+        costos = [(c, P.costo_fabricado(bom, c, precios_)['total']) for c in cueros]
+        st.markdown("<div class='nota'>Costo de fabricación por unidad: " + ' · '.join(
+            f"{html.escape(c)} <b>{money(q, 2)}</b>" for c, q in costos) + "</div>", unsafe_allow_html=True)
     margen = st.slider("Margen retail que quieres", min_value=10, max_value=90, step=1,
                        value=int(round((previo or {}).get('margen', MARGEN_RETAIL_DEFAULT) * 100)),
                        format='%d%%', key=f'np_margen_{idx}') / 100
@@ -570,13 +640,14 @@ def dialogo_nuevo(idx=None):
     if not cueros:
         errores.append("Elige al menos un cuero.")
     elif any(q is None or q <= 0 for _, q in costos):
-        errores.append("Pon el costo de cada cuero elegido.")
+        errores.append("Pon el costo de cada cuero elegido." if origen == 'prov' else
+                       "Llena la hoja de costos: el costo de fabricación está en $0.")
 
     con_precio = None
     if cueros and all(q is not None and q > 0 for _, q in costos):
         con_precio, d = precios_por_margen(nombre or 'nuevo', unid, costos, margen, st.session_state['fila_libre'])
         st.markdown(tabla_precios_html(d), unsafe_allow_html=True)
-        st.markdown(f"<div class='nota'>Costo = proveedor con ajuste cambiario + empaque general "
+        st.markdown(f"<div class='nota'>Costo = costo base (proveedor o fabricación) con ajuste cambiario + empaque general "
                     f"({money(p['B7'], 2)}) + flete ({money(p['B8'])} ÷ {unid:.0f} und) + arancel. "
                     "Wholesale y corporativo salen del retail con los % de Ajustes. El retail se redondea "
                     "a dólar entero; después lo puedes ajustar en la ficha.</div>", unsafe_allow_html=True)
@@ -584,8 +655,12 @@ def dialogo_nuevo(idx=None):
         st.markdown(f"<div class='aviso'>{html.escape(e)}</div>", unsafe_allow_html=True)
     if st.button("Agregar producto" if idx is None else "Actualizar", type='primary',
                  disabled=bool(errores), width='stretch'):
-        nuevo = {'nombre': nombre, 'unid': float(unid), 'margen': margen,
+        nuevo = {'nombre': nombre, 'unid': float(unid), 'margen': margen, 'bom': bom,
                  'cueros': [(c, float(q), float(pr)) for c, q, pr in con_precio]}
+        if mats_nuevos is not None:
+            st.session_state['pend_mat'] = None if _mat_igual(mats_nuevos, M_orig) else mats_nuevos
+            st.session_state.pop('mat_base', None)
+            st.session_state.pop('mat_ed', None)
         if idx is None:
             pend_nuevos.append(nuevo)
         else:
@@ -837,10 +912,11 @@ def _escrituras():
     for f_ in sorted(filas_c):
         datos.append({'range': f'C{f_}', 'values': [[round(float(desglose_fab[f_]['total']), 4)]]})
     for nv, f0 in _ubicar_nuevos():
-        filas_ = P.filas_producto_nuevo(nv['nombre'], nv['unid'], nv['cueros'], f0)
+        filas_ = P.filas_producto_nuevo(nv['nombre'], nv['unid'], _cueros_nv(nv), f0)
         datos.append({'range': f'A{f0}:X{f0 + len(filas_) - 1}', 'values': filas_})
     nuevo_fab = {k: v for k, v in {**F_orig, **pend_fab}.items() if v is not None}
-    if pend_fab:
+    nuevo_fab.update({nv['nombre']: nv['bom'] for nv in pend_nuevos if nv.get('bom')})
+    if pend_fab or any(nv.get('bom') for nv in pend_nuevos):
         grids[P.HOJA_FAB] = P.grid_fab(nuevo_fab)
     if st.session_state.get('pend_mat') is not None or (st.session_state['M_raw'] is None and nuevo_fab):
         grids[P.HOJA_MATERIALES] = P.grid_materiales(mat_actual())
