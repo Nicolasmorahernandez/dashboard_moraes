@@ -249,3 +249,92 @@ def payload_escritura(cambios):
             v = ''
         datos.append({'range': c['celda'], 'values': [[v]]})
     return datos
+
+
+# ── Empaque por producto ──────────────────────────────────────────
+# Cada producto (todas sus filas de cuero) usa uno de tres modos en la
+# columna E de "Modelo":
+#   'default'     → =$B$7 (empaque general de Ajustes)
+#   'manual'      → un número escrito a mano
+#   'componentes' → =SUMIF(Empaque!A:A,"<producto>",Empaque!C:C), con el detalle
+#                   (bolsa, logo, caja…) en la pestaña "Empaque".
+# 'otra' = cualquier otra fórmula: no se toca.
+
+HOJA_EMPAQUE = 'Empaque'
+CABECERA_EMPAQUE = ['Producto', 'Concepto', 'Valor (USD)']
+CONCEPTOS_SUGERIDOS = ['Bolsa', 'Logo', 'Caja']
+
+
+def formula_default():
+    return '=$B$7'
+
+
+def formula_componentes(producto):
+    nombre = producto.replace('"', '""')
+    return f'=SUMIF({HOJA_EMPAQUE}!$A:$A,"{nombre}",{HOJA_EMPAQUE}!$C:$C)'
+
+
+def modo_empaque(formula):
+    """formula = texto de la celda E en modo FORMULA ('' si es un número)."""
+    if not formula:
+        return 'manual'
+    f = formula.replace('$', '').replace(' ', '').upper()
+    if f == '=B7':
+        return 'default'
+    if f.startswith('=SUMIF(') and HOJA_EMPAQUE.upper() in f:
+        return 'componentes'
+    return 'otra'
+
+
+def parsear_empaque(grid):
+    """Pestaña Empaque → {producto: [(concepto, valor), ...]}. Ignora la cabecera."""
+    out = {}
+    for fila in grid[1:]:
+        fila = list(fila) + ['', '', '']
+        prod, concepto, valor = str(fila[0]).strip(), str(fila[1]).strip(), a_numero(fila[2])
+        if not prod or (not concepto and math.isnan(valor)):
+            continue
+        out.setdefault(prod, []).append((concepto, 0.0 if math.isnan(valor) else valor))
+    return out
+
+
+def grid_empaque(componentes):
+    """{producto: [(concepto, valor)]} → filas para escribir en la pestaña."""
+    filas = [CABECERA_EMPAQUE]
+    for prod, items in componentes.items():
+        for concepto, valor in items:
+            filas.append([prod, concepto, float(valor)])
+    return filas
+
+
+def estado_empaque(df_prod, componentes):
+    """{producto: {'modo', 'total', 'items'}} a partir de lo leído del Sheet.
+    El modo de un producto es el de su primera fila; si sus filas tienen modos
+    distintos, se marca 'mixto' y se trata como 'otra' (no editable)."""
+    out = {}
+    for prod, g in df_prod.groupby('Producto', sort=False):
+        modos = {modo_empaque(f) for f in g['_f_E']}
+        modo = modos.pop() if len(modos) == 1 else 'mixto'
+        total = g['Empaque'].iloc[0]
+        if modo == 'manual' and g['Empaque'].nunique(dropna=False) > 1:
+            modo = 'mixto'
+        out[prod] = {'modo': modo, 'total': total, 'items': list(componentes.get(prod, []))}
+    return out
+
+
+def empaque_efectivo(estado, b7):
+    """Valor por unidad que usa la vista previa."""
+    if estado['modo'] == 'default':
+        return b7
+    if estado['modo'] == 'componentes':
+        return sum(v for _, v in estado['items'])
+    return estado['total']
+
+
+def valor_celda_empaque(producto, estado):
+    """Lo que se escribe en E (USER_ENTERED)."""
+    if estado['modo'] == 'default':
+        return formula_default()
+    if estado['modo'] == 'componentes':
+        return formula_componentes(producto)
+    return float(estado['total'])

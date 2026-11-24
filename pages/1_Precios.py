@@ -10,8 +10,9 @@ aquí se replican para la vista previa (ver precios.py).
 import html
 import math
 
+import pandas as pd
 import streamlit as st
-from gspread.exceptions import APIError, SpreadsheetNotFound
+from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 from gspread.utils import ValueRenderOption
 
 import precios as P
@@ -84,6 +85,8 @@ button[data-testid^="stBaseButton-secondary"]:hover, .stPopover button:hover {{ 
 .corp b {{ color:{INK}; font-weight:600; }}
 .nota {{ font-size:.76rem; color:{FAINT}; margin-top:.5rem; }}
 .pend {{ font-size:.82rem; color:{GOLD}; }}
+.ln.sub {{ padding:.25rem 0 .25rem 1.35rem; font-size:.8rem; color:{MUTED}; border-bottom:1px dashed {LINE}; }}
+.emp-t {{ font-size:.78rem; letter-spacing:.04em; color:{MUTED}; margin:.9rem 0 .35rem; }}
 @media (max-width: 760px) {{
   .tiers {{ grid-template-columns:repeat(2,1fr); }}
   .titulo {{ font-size:2rem; }}
@@ -95,9 +98,23 @@ button[data-testid^="stBaseButton-secondary"]:hover, .stPopover button:hover {{ 
 
 # ── Datos ─────────────────────────────────────────────────────────
 
-def _hoja():
+def _libro():
     gc = autenticar()
-    return gc, gc.open_by_key(SHEET_PRECIOS_ID).worksheet(P.HOJA)
+    return gc, gc.open_by_key(SHEET_PRECIOS_ID)
+
+
+def _hoja():
+    gc, sh = _libro()
+    return gc, sh.worksheet(P.HOJA)
+
+
+def _leer_empaque(sh):
+    """Grid de la pestaña Empaque, o None si no existe todavía."""
+    try:
+        ws = sh.worksheet(P.HOJA_EMPAQUE)
+    except WorksheetNotFound:
+        return None
+    return [list(f) for f in ws.get_all_values(value_render_option=ValueRenderOption.unformatted)]
 
 
 def _leer_grids(ws):
@@ -109,8 +126,10 @@ def _leer_grids(ws):
 def cargar():
     gc = None
     try:
-        gc, ws = _hoja()
+        gc, sh = _libro()
+        ws = sh.worksheet(P.HOJA)
         valores, formulas = _leer_grids(ws)
+        grid_emp = _leer_empaque(sh)
     except (APIError, SpreadsheetNotFound, PermissionError) as e:
         email = None
         try:
@@ -120,8 +139,14 @@ def cargar():
         st.error("No pude abrir la hoja de precios. Compártela como *Editor* con la cuenta del dashboard"
                  f"{f' (**{email}**)' if email else ''} desde [la hoja]({URL_SHEET}) y recarga.\n\n`{e}`")
         st.stop()
-    st.session_state['precios_orig'] = P.parsear(valores, formulas)
+    params, prod = P.parsear(valores, formulas)
+    componentes = P.parsear_empaque(grid_emp or [])
+    st.session_state['precios_orig'] = (params, prod)
+    st.session_state['emp_raw'] = grid_emp
+    st.session_state['emp_orig'] = P.estado_empaque(prod, componentes)
+    st.session_state['emp_componentes'] = componentes
     st.session_state['pend'] = {}
+    st.session_state['pend_emp'] = {}
 
 
 if 'precios_orig' not in st.session_state:
@@ -144,10 +169,50 @@ def _aplicar(params, prod):
     return params, prod
 
 
+emp_orig = st.session_state['emp_orig']
+pend_emp = st.session_state.setdefault('pend_emp', {})   # {producto: estado de empaque nuevo}
+EDITABLE_EMP = ('default', 'manual', 'componentes')
+
+
+def emp_actual(prod):
+    return pend_emp.get(prod, emp_orig[prod])
+
+
 params_nuevo, prod_nuevo = _aplicar(params_orig, prod_orig)
+_b7 = params_nuevo.loc[params_nuevo['Celda'] == 'B7', 'Valor'].iloc[0]
+for _prod, _est in emp_orig.items():
+    _est = emp_actual(_prod)
+    if _est['modo'] in EDITABLE_EMP:
+        _m = prod_nuevo['Producto'] == _prod
+        prod_nuevo.loc[_m, 'Empaque'] = P.empaque_efectivo(_est, _b7)
+        prod_nuevo.loc[_m, '_f_E'] = ''
 df = P.calcular(params_nuevo, prod_nuevo)
 p = dict(zip(params_nuevo['Celda'], params_nuevo['Valor']))
-cambios = P.cambios_pendientes(params_orig, params_nuevo, prod_orig, prod_nuevo)
+# El empaque de productos va por su propio camino (modos); se excluye del diff genérico
+cambios = [c for c in P.cambios_pendientes(params_orig, params_nuevo, prod_orig, prod_nuevo)
+           if not (c['celda'][0] == 'E' and int(c['celda'][1:]) >= P.FILA_INICIO)]
+NOMBRE_MODO = {'default': 'predeterminado', 'manual': 'total manual', 'componentes': 'por componentes'}
+
+
+def _emp_igual(a, b):
+    if a['modo'] != b['modo']:
+        return False
+    if a['modo'] == 'manual':
+        return not P._distinto(a['total'], b['total'])
+    if a['modo'] == 'componentes':
+        return [(c, round(v, 6)) for c, v in a['items']] == [(c, round(v, 6)) for c, v in b['items']]
+    return True
+
+
+for _prod in list(pend_emp):
+    if _emp_igual(pend_emp[_prod], emp_orig[_prod]):
+        del pend_emp[_prod]
+for _prod, _est in pend_emp.items():
+    cambios.append({'celda': 'E', 'que': f"{_prod} · Empaque",
+                    'antes': P.empaque_efectivo(emp_orig[_prod], p['B7']),
+                    'despues': P.empaque_efectivo(_est, p['B7']),
+                    'bloqueada': False, 'empaque': _prod,
+                    'nota': NOMBRE_MODO[_est['modo']]})
 
 
 # ── Helpers de formato ────────────────────────────────────────────
@@ -157,7 +222,7 @@ def _nan(x):
 
 
 def money(x, dec=0):
-    return '—' if _nan(x) else f"${x:,.{dec}f}"
+    return '—' if _nan(x) else f"{'-' if x < 0 else ''}${abs(x):,.{dec}f}"
 
 
 def pct(x):
@@ -194,6 +259,58 @@ def entrada(celda, label, valor, bloqueada=False, fmt='%.2f', step=0.5, min_valu
 
 def ir(producto):
     st.session_state['producto'] = producto
+    for k in [k for k in st.session_state if k.startswith('emp_')
+              and k not in ('emp_orig', 'emp_raw', 'emp_componentes')]:
+        del st.session_state[k]
+    st.session_state['visita'] = st.session_state.get('visita', 0) + 1
+
+
+def bloque_empaque(prod):
+    """Editor de empaque del producto (aplica a todos sus cueros)."""
+    est = emp_actual(prod)
+    st.markdown("<div class='emp-t'>Empaque por unidad</div>", unsafe_allow_html=True)
+    if est['modo'] not in EDITABLE_EMP:
+        st.number_input("Empaque", value=None if _nan(est['total']) else float(est['total']),
+                        disabled=True, label_visibility='collapsed', key='emp_bloq')
+        st.markdown("<div class='nota'>Este producto tiene un empaque distinto por cuero o una fórmula "
+                    "especial en el Sheet; cámbialo allá.</div>", unsafe_allow_html=True)
+        return
+    opciones = {'default': f"General ({money(p['B7'], 2)})", 'manual': 'Total', 'componentes': 'Detallado'}
+    modo = st.segmented_control("Modo de empaque", list(opciones), format_func=opciones.get,
+                                default=est['modo'], key=f'emp_modo_{prod}',
+                                label_visibility='collapsed') or est['modo']
+    nuevo = {'modo': modo, 'total': est['total'], 'items': list(est['items'])}
+    if modo == 'default':
+        st.markdown(f"<div class='nota'>Usa el empaque general de Ajustes: {money(p['B7'], 2)} por unidad.</div>",
+                    unsafe_allow_html=True)
+    elif modo == 'manual':
+        base = est['total'] if est['modo'] == 'manual' else P.empaque_efectivo(est, p['B7'])
+        nuevo['total'] = st.number_input("Total empaque (USD)", value=None if _nan(base) else float(base),
+                                         min_value=0.0, step=0.25, format='%.2f', key=f'emp_total_{prod}')
+        if nuevo['total'] is None:
+            nuevo['total'] = math.nan
+    else:
+        clave_base = f'emp_base_{prod}'
+        if clave_base not in st.session_state:
+            items = est['items'] or [(c, 0.0) for c in P.CONCEPTOS_SUGERIDOS]
+            st.session_state[clave_base] = pd.DataFrame(items, columns=['Concepto', 'Valor'])
+        tabla = st.data_editor(
+            st.session_state[clave_base], key=f"emp_items_{prod}_{st.session_state.get('visita', 0)}",
+            num_rows='dynamic', hide_index=True, width='stretch',
+            column_config={'Concepto': st.column_config.TextColumn(required=True),
+                           'Valor': st.column_config.NumberColumn('USD', format='$%.2f', min_value=0.0)})
+        nuevo['items'] = [(str(c).strip(), float(v) if not _nan(v) else 0.0)
+                          for c, v in zip(tabla['Concepto'], tabla['Valor'])
+                          if c is not None and str(c).strip()]
+        st.markdown(f"<div class='nota'>Total: <b>{money(sum(v for _, v in nuevo['items']), 2)}</b>. "
+                    "Agrega filas con el + de la tabla (otros insumos).</div>", unsafe_allow_html=True)
+    st.markdown("<div class='nota'>Aplica a todos los cueros de este producto.</div>", unsafe_allow_html=True)
+    if _emp_igual(nuevo, emp_orig[prod]):
+        if pend_emp.pop(prod, None) is not None:
+            st.rerun()
+    elif prod not in pend_emp or not _emp_igual(nuevo, pend_emp[prod]):
+        pend_emp[prod] = nuevo
+        st.rerun()
 
 
 # ── Encabezado ────────────────────────────────────────────────────
@@ -281,12 +398,11 @@ else:
         st.markdown(f"<div class='panel-t'>Editar · {html.escape(cuero)}</div>", unsafe_allow_html=True)
         entrada(f'C{fila}', 'Costo proveedor (USD, a tasa base)', o['Costo proveedor'], bool(o['_f_C']))
         entrada(f'J{fila}', 'Precio retail (USD)', o['Precio retail'], bool(o['_f_J']), fmt='%.0f', step=1.0)
-        entrada(f'E{fila}', 'Empaque por unidad', o['Empaque'], bool(o['_f_E']),
-                ayuda=f"Celda E{fila}" + (" · usa el empaque general de Ajustes" if o['_f_E'] else ""))
         entrada(f'F{fila}', 'Unidades por caja', o['Unid/caja'], bool(o['_f_F']), fmt='%.0f', step=1.0, min_value=1.0)
-        if o['_f_E'] or o['_f_J']:
-            st.markdown("<div class='nota'>Los campos bloqueados tienen fórmula en el Sheet "
-                        "(p. ej. el empaque sale de Ajustes).</div>", unsafe_allow_html=True)
+        if o['_f_J']:
+            st.markdown("<div class='nota'>El precio de este cuero tiene fórmula en el Sheet; se cambia allá.</div>",
+                        unsafe_allow_html=True)
+        bloque_empaque(producto_sel)
 
     # Desglose
     with der:
@@ -318,10 +434,16 @@ else:
             barra = "<div class='bar'>" + ''.join(
                 f"<div title='{n}' style='width:{max(v, 0) / total * 100:.2f}%;background:{SEG[n]}'></div>"
                 for n, v, _ in segs if not _nan(v) and v > 0) + "</div>"
-        lineas = ''.join(
-            f"<div class='ln'><span><i style='background:{SEG[n]}'></i>{n}"
-            f"{f'<small>{nota}</small>' if nota else ''}</span><span>{money(v, 2)}</span></div>"
-            for n, v, nota in partes)
+        _est = emp_actual(producto_sel)
+        partes[2] = ('Empaque', r['Empaque'],
+                     {'default': 'general', 'manual': '', 'componentes': 'detallado'}.get(_est['modo'], ''))
+        lineas = ''
+        for n, v, nota in partes:
+            lineas += (f"<div class='ln'><span><i style='background:{SEG[n]}'></i>{n}"
+                       f"{f'<small>{nota}</small>' if nota else ''}</span><span>{money(v, 2)}</span></div>")
+            if n == 'Empaque' and _est['modo'] == 'componentes':
+                lineas += ''.join(f"<div class='ln sub'><span>{html.escape(c)}</span><span>{money(x, 2)}</span></div>"
+                                  for c, x in _est['items'])
         st.markdown(
             cabecera + barra + lineas +
             f"<div class='ln total'><span>Costo variable por unidad</span><span>{money(costo, 2)}</span></div>"
@@ -359,13 +481,69 @@ else:
 
 
 # ── Barra de guardado (solo si hay cambios) ───────────────────────
+
+def _limpiar_widgets():
+    for k in [k for k in st.session_state if k.startswith('in_') or
+              (k.startswith('emp_') and k not in ('emp_orig', 'emp_raw', 'emp_componentes'))]:
+        del st.session_state[k]
+
+
+def _escrituras():
+    """(celdas para Modelo, grid nuevo para la pestaña Empaque o None si no cambia)."""
+    datos = [{'range': d['range'], 'values': [[float(v) if v != '' else '' for v in d['values'][0]]]}
+             for d in P.payload_escritura([c for c in cambios if 'empaque' not in c])]
+    componentes = {k: list(v) for k, v in st.session_state['emp_componentes'].items()}
+    for prod, est in pend_emp.items():
+        valor = P.valor_celda_empaque(prod, est)
+        for f_ in prod_orig.loc[prod_orig['Producto'] == prod, 'Fila']:
+            datos.append({'range': f'E{int(f_)}', 'values': [[valor]]})
+        if est['modo'] == 'componentes':
+            componentes[prod] = est['items']
+        else:
+            componentes.pop(prod, None)
+    grid = None
+    if componentes != st.session_state['emp_componentes']:
+        grid = P.grid_empaque(componentes)
+    return datos, grid
+
+
+def _conflictos(sh, ws, datos):
+    valores_ahora, formulas_ahora = _leer_grids(ws)
+    vals_orig = {}
+    for _, r_ in prod_orig.iterrows():
+        vals_orig[f"E{int(r_['Fila'])}"] = (r_['_f_E'], r_['Empaque'])
+    out = []
+    for c in cambios:
+        if 'empaque' in c or c['bloqueada']:
+            continue
+        f_, col_ = P.celda_a_rc(c['celda'])
+        if P.es_formula(P._get(formulas_ahora, f_, col_)):
+            out.append(f"{c['celda']} ahora tiene fórmula")
+        elif P._distinto(P.a_numero(P._get(valores_ahora, f_, col_)), c['antes']):
+            out.append(f"{c['celda']} cambió en el Sheet")
+    for d in datos:
+        if d['range'] in vals_orig:
+            f_, col_ = P.celda_a_rc(d['range'])
+            frm, val = vals_orig[d['range']]
+            frm_ahora = P._get(formulas_ahora, f_, col_)
+            frm_ahora = frm_ahora if P.es_formula(frm_ahora) else ''
+            if frm_ahora != frm or (not frm and P._distinto(P.a_numero(P._get(valores_ahora, f_, col_)), val)):
+                out.append(f"{d['range']} (empaque) cambió en el Sheet")
+    if _leer_empaque(sh) != st.session_state['emp_raw']:
+        out.append("la pestaña Empaque cambió en el Sheet")
+    return out
+
+
 if cambios:
     st.markdown("<hr class='rule'>", unsafe_allow_html=True)
-    escribibles = P.payload_escritura(cambios)
+    datos, grid_emp_nuevo = _escrituras()
     s1, s2, s3 = st.columns([2.2, 1, 1], vertical_alignment='center')
     with s1:
-        detalle = ' · '.join(f"{c['que']}: {c['antes']:g} → {c['despues']:g}" for c in cambios[:3]
-                             if not (_nan(c['antes']) or _nan(c['despues'])))
+        def _fmt(c):
+            if 'empaque' in c:
+                return f"{c['que']}: {money(c['antes'], 2)} → {money(c['despues'], 2)} ({c['nota']})"
+            return f"{c['que']}: {c['antes']:g} → {c['despues']:g}"
+        detalle = ' · '.join(_fmt(c) for c in cambios[:3] if not (_nan(c['antes']) and _nan(c['despues'])))
         st.markdown(f"<span class='pend'>● {len(cambios)} cambio(s) sin guardar</span>"
                     f"<div class='nota'>{html.escape(detalle)}{' …' if len(cambios) > 3 else ''}</div>",
                     unsafe_allow_html=True)
@@ -373,35 +551,32 @@ if cambios:
         autorizado = (st.text_input("Clave", type="password", label_visibility='collapsed',
                                     placeholder="Clave para guardar") == clave) if clave else True
     if s3.button("Descartar", width='stretch'):
-        for c in list(pend):
-            st.session_state.pop(f'in_{c}', None)
+        _limpiar_widgets()
         pend.clear()
+        pend_emp.clear()
         st.rerun()
     if s2.button("Guardar en Sheets", type="primary", width='stretch',
-                 disabled=not escribibles or not autorizado):
+                 disabled=not (datos or grid_emp_nuevo) or not autorizado):
         try:
-            _, ws = _hoja()
-            valores_ahora, formulas_ahora = _leer_grids(ws)
-            conflictos = []
-            for c in cambios:
-                if c['bloqueada']:
-                    continue
-                f_, col_ = P.celda_a_rc(c['celda'])
-                if P.es_formula(P._get(formulas_ahora, f_, col_)):
-                    conflictos.append(f"{c['celda']} ahora tiene fórmula")
-                elif P._distinto(P.a_numero(P._get(valores_ahora, f_, col_)), c['antes']):
-                    conflictos.append(f"{c['celda']} cambió en el Sheet")
+            _, sh = _libro()
+            ws = sh.worksheet(P.HOJA)
+            conflictos = _conflictos(sh, ws, datos)
             if conflictos:
                 st.error("No guardé nada porque la hoja cambió mientras editabas: "
                          + "; ".join(conflictos) + ". Presiona *Recargar*.")
             else:
-                ws.batch_update([{'range': d['range'],
-                                  'values': [[float(v) if v != '' else '' for v in d['values'][0]]]}
-                                 for d in escribibles], value_input_option='RAW')
-                for k in [k for k in st.session_state if k.startswith('in_')]:
-                    del st.session_state[k]
+                if grid_emp_nuevo is not None:   # primero el detalle, luego las fórmulas que lo usan
+                    try:
+                        ws_emp = sh.worksheet(P.HOJA_EMPAQUE)
+                    except WorksheetNotFound:
+                        ws_emp = sh.add_worksheet(P.HOJA_EMPAQUE, rows=200, cols=3)
+                    ws_emp.clear()
+                    ws_emp.update(grid_emp_nuevo, 'A1', value_input_option='RAW')
+                if datos:
+                    ws.batch_update(datos, value_input_option='USER_ENTERED')
+                _limpiar_widgets()
                 cargar()
-                st.session_state['precios_guardado'] = len(escribibles)
+                st.session_state['precios_guardado'] = True
                 st.rerun()
         except APIError as e:
             st.error(f"Google Sheets rechazó la escritura: `{e}`")
