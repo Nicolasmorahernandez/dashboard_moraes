@@ -14,12 +14,14 @@ Python / Streamlit / Plotly / gspread / pandas. Sin base de datos: la fuente de 
 - `data.py` — funciones `cargar_*` (una por pestaña del Sheet, `@st.cache_data(ttl=300)`) y `ajustar_inventario_con_ventas`.
 - `auth.py` — `autenticar()`: service account desde `st.secrets` (Cloud), o token OAuth local (`token.pickle` / `credentials.json`, gitignoreados).
 - `constants.py` — IDs de los Sheets y `SKU_MAP` (SKUs de Amazon → SKU interno).
+- `pages/1_Precios.py` — página de precios y rentabilidad por producto; lee y **escribe** la hoja `MORAES_precios_ok` (pestaña Modelo). Lógica pura (parseo, réplica de fórmulas para vista previa, diff de cambios) en `precios.py`.
 - `crear_hoja_costos.py` — script one-off que crea la hoja "Costos Amazon" de auditoría.
 
 ## Fuentes de datos (Google Sheets)
 
 1. **"flujo de cajas"** (`SHEET_FINANZAS_ID`): pestañas Gastos Operativos, Ventas, Márgenes, Inventario. Las cabeceras reales empiezan en filas distintas (`head=2..4` según pestaña) y hay filas de totales/leyendas que se filtran a mano.
 2. **Sheet Amazon** (`SHEET_AMAZON_ID`): Ventas Amazon y Gastos Amazon (fees, montos negativos).
+3. **"MORAES_precios_ok"** (`SHEET_PRECIOS_ID`, override `sheet_precios_id`): parámetros en B4:B16/E5:E15, productos desde fila 19. La app solo escribe celdas de entrada (C, E, F, J y parámetros) que no tengan fórmula; los cálculos los hace el Sheet. Chequea conflictos antes de escribir. Secret opcional `clave_precios` protege el guardado.
 
 ## Decisiones clave
 

@@ -378,6 +378,8 @@ st.markdown(f"""<div class="dash-header">
 
 # ── Toggle de escenario ───────────────────────────────────────────
 _tg1, _tgb, _tg2 = st.columns([2.2, 0.8, 1])
+with _tg1:
+    st.page_link("pages/1_Precios.py", label="Precios y rentabilidad por producto", icon="💲")
 with _tgb:
     if st.button("🔄 Actualizar datos", help="Recarga los datos desde Google Sheets (salta el caché de 5 min)."):
         st.cache_data.clear()
