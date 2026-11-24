@@ -292,7 +292,10 @@ def bloque_empaque(prod):
     else:
         clave_base = f'emp_base_{prod}'
         if clave_base not in st.session_state:
-            items = est['items'] or [(c, 0.0) for c in P.CONCEPTOS_SUGERIDOS]
+            actual = P.empaque_efectivo(est, p['B7'])
+            # Si no hay detalle, arranca con el total actual "sin detallar" para no bajar el costo a $0
+            items = est['items'] or ([('Sin detallar', float(actual))] if not _nan(actual) and actual > 0 else []) \
+                + [(c, 0.0) for c in P.CONCEPTOS_SUGERIDOS]
             st.session_state[clave_base] = pd.DataFrame(items, columns=['Concepto', 'Valor'])
         tabla = st.data_editor(
             st.session_state[clave_base], key=f"emp_items_{prod}_{st.session_state.get('visita', 0)}",
@@ -303,7 +306,8 @@ def bloque_empaque(prod):
                           for c, v in zip(tabla['Concepto'], tabla['Valor'])
                           if c is not None and str(c).strip()]
         st.markdown(f"<div class='nota'>Total: <b>{money(sum(v for _, v in nuevo['items']), 2)}</b>. "
-                    "Agrega filas con el + de la tabla (otros insumos).</div>", unsafe_allow_html=True)
+                    "Reparte el valor de “Sin detallar” en bolsa, logo, caja… y bórralo; "
+                    "agrega otros insumos con el + de la tabla.</div>", unsafe_allow_html=True)
     st.markdown("<div class='nota'>Aplica a todos los cueros de este producto.</div>", unsafe_allow_html=True)
     if _emp_igual(nuevo, emp_orig[prod]):
         if pend_emp.pop(prod, None) is not None:
