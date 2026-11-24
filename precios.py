@@ -420,3 +420,59 @@ def costo_fabricado(bom, cuero, precios):
     return {'cuero': cuero_usd, 'precio_cuero': p_cuero, 'materiales': materiales, 'detalle_mat': mats,
             'mano': mano, 'valor_hora': precios.get(VALOR_HORA, 0.0), 'taller': taller,
             'total': base + taller}
+
+
+# ── Productos nuevos ──────────────────────────────────────────────
+# Se agregan como filas nuevas al final de la tabla, una por cuero, con las
+# mismas fórmulas que las filas existentes. El nombre va solo en la primera.
+
+MULT_CUERO = {'Vaqueta': 'E5', 'Napa': 'E6', 'Crazy Horse': 'E7', 'Hampton': 'E8'}
+
+
+def ultima_fila_ocupada(valores):
+    """Última fila (1-indexed) con algo escrito en A:X, desde la cabecera."""
+    ultima = FILA_CABECERA
+    for i in range(FILA_CABECERA, len(valores)):
+        if any(str(x).strip() for x in valores[i][:len(LETRAS)]):
+            ultima = i + 1
+    return ultima
+
+
+def formula_precio_por_multiplicador(fila_base, cuero):
+    """Precio = precio del primer cuero × multiplicador del cuero (como Wine Deluxe)."""
+    return f'=J{fila_base}*{MULT_CUERO[cuero]}'
+
+
+def filas_producto_nuevo(nombre, unid_caja, cueros, fila0):
+    """cueros: [(cuero, costo, precio)] con precio NaN = usar multiplicador.
+    Devuelve una lista de filas A..X listas para escribir (USER_ENTERED)."""
+    filas = []
+    for k, (cuero, costo, precio) in enumerate(cueros):
+        r = fila0 + k
+        if isinstance(precio, float) and math.isnan(precio):
+            j = formula_precio_por_multiplicador(fila0, cuero) if k > 0 else ''
+        else:
+            j = float(precio)
+        filas.append([
+            nombre if k == 0 else '', cuero, float(costo),
+            f'=C{r}*($B$4/$B$5)', formula_default(), float(unid_caja), f'=$B$8/F{r}',
+            f'=D{r}+E{r}+G{r}+$B$9', f'=${MULT_CUERO[cuero][0]}${MULT_CUERO[cuero][1:]}', j,
+            f'=(J{r}-H{r})/J{r}', f'=ROUND(J{r}*$B$10)', f'=(L{r}-H{r})/L{r}',
+            f'=ROUND(J{r}*$B$11)', f'=(N{r}-H{r})/N{r}', f'=ROUND(J{r}*$B$12)', f'=(P{r}-H{r})/P{r}',
+            f'=(J{r}-L{r})/J{r}', f'=ROUND(J{r}*$B$13)', f'=ROUND(J{r}*$B$14)', f'=ROUND(J{r}*$B$15)',
+            f'=ROUND(J{r}*$E$15)', f'=ROUND(H{r}*4)', f'=IF((L{r}-H{r})>0,$B$16/(L{r}-H{r}),"")',
+        ])
+    return filas
+
+
+def df_producto_nuevo(nombre, unid_caja, cueros, fila0, b7):
+    """Filas en el formato de parsear() para la vista previa."""
+    regs = []
+    for k, fila in enumerate(filas_producto_nuevo(nombre, unid_caja, cueros, fila0)):
+        j = fila[9]
+        regs.append({'Fila': fila0 + k, 'Producto': nombre, 'Cuero': fila[1],
+                     'Costo proveedor': fila[2], '_f_C': '', 'Empaque': b7, '_f_E': formula_default(),
+                     'Unid/caja': fila[5], '_f_F': '',
+                     'Precio retail': j if isinstance(j, float) else math.nan,
+                     '_f_J': j if isinstance(j, str) else ''})
+    return pd.DataFrame(regs)

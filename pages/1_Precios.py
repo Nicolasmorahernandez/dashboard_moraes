@@ -34,6 +34,7 @@ SEG = {  # colores del desglose de costo
     'Flete': '#8c7a6b', 'Arancel': '#5e5048', 'Ganancia': '#86c58a',
 }
 CHIP_TALLER = "<span class='chip'>Taller</span>"
+CHIP_NUEVO = "<span class='chip nuevo'>Nuevo · sin guardar</span>"
 MARGEN_BAJO, MARGEN_OK = 0.20, 0.35   # supuesto: rojo < 20%, dorado < 35%
 
 st.markdown(f"""
@@ -59,6 +60,7 @@ h1,h2,h3 {{ font-family:'Cormorant Garamond',serif !important; font-weight:600 !
 button[data-testid^="stBaseButton-secondary"], .stPopover button {{ background:transparent; border:1px solid {LINE}; color:{INK}; border-radius:999px; font-size:.82rem; }}
 button[data-testid^="stBaseButton-secondary"]:hover, .stPopover button:hover {{ border-color:{COGNAC}; color:{COGNAC}; }}
 .stButton > button[kind="primary"] {{ background:{COGNAC}; border-color:{COGNAC}; color:#1a0f09; font-weight:600; }}
+.stButton > button[kind="primary"]:disabled {{ opacity:.35; }}
 .stButton > button[kind="primary"]:hover {{ background:{GOLD}; border-color:{GOLD}; color:#1a0f09; }}
 
 /* Inputs */
@@ -87,6 +89,7 @@ button[data-testid^="stBaseButton-secondary"]:hover, .stPopover button:hover {{ 
 .nota {{ font-size:.76rem; color:{FAINT}; margin-top:.5rem; }}
 .pend {{ font-size:.82rem; color:{GOLD}; }}
 .ln.sub {{ padding:.25rem 0 .25rem 1.35rem; font-size:.8rem; color:{MUTED}; border-bottom:1px dashed {LINE}; }}
+.chip.nuevo {{ color:{GREEN}; }}
 .chip {{ display:inline-block; font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:{GOLD}; border:1px solid {LINE}; border-radius:999px; padding:.1rem .55rem; margin-left:.4rem; vertical-align:middle; }}
 .aviso {{ font-size:.78rem; color:{GOLD}; margin:.35rem 0; }}
 .emp-t {{ font-size:.78rem; letter-spacing:.04em; color:{MUTED}; margin:.9rem 0 .35rem; }}
@@ -162,6 +165,8 @@ def cargar():
     st.session_state['pend_emp'] = {}
     st.session_state['pend_fab'] = {}
     st.session_state['pend_mat'] = None
+    st.session_state['pend_nuevos'] = []
+    st.session_state['fila_libre'] = P.ultima_fila_ocupada(valores) + 1
     st.session_state['carga'] = st.session_state.get('carga', 0) + 1
 
 
@@ -244,6 +249,23 @@ for _i, _r in prod_nuevo.iterrows():
         prod_nuevo.at[_i, '_f_C'] = ''
 df = P.calcular(params_nuevo, prod_nuevo)
 p = dict(zip(params_nuevo['Celda'], params_nuevo['Valor']))
+
+# Productos nuevos (sin guardar): filas al final de la tabla
+pend_nuevos = st.session_state.setdefault('pend_nuevos', [])   # [{'nombre', 'unid', 'cueros'}]
+
+
+def _ubicar_nuevos():
+    """[(producto nuevo, fila inicial)] en el orden en que se escribirán."""
+    out, fila_ = [], st.session_state['fila_libre']
+    for nv in pend_nuevos:
+        out.append((nv, fila_))
+        fila_ += len(nv['cueros'])
+    return out
+
+
+df_nuevos = pd.concat(
+    [P.calcular(params_nuevo, P.df_producto_nuevo(nv['nombre'], nv['unid'], nv['cueros'], f0, p['B7']))
+     for nv, f0 in _ubicar_nuevos()], ignore_index=True) if pend_nuevos else None
 # El empaque de productos va por su propio camino (modos); se excluye del diff genérico
 _filas_fab = {f'C{f}' for f in desglose_fab}
 cambios = [c for c in P.cambios_pendientes(params_orig, params_nuevo, prod_orig, prod_nuevo)
@@ -252,6 +274,9 @@ cambios = [c for c in P.cambios_pendientes(params_orig, params_nuevo, prod_orig,
 for _prod, _bom in pend_fab.items():
     cambios.append({'celda': 'C', 'que': f"{_prod} · {'fabricado por mí' if _bom is not None else 'comprado al proveedor'}",
                     'antes': math.nan, 'despues': math.nan, 'bloqueada': False, 'fab': _prod})
+for _nv in pend_nuevos:
+    cambios.append({'celda': 'N', 'que': f"Producto nuevo: {_nv['nombre']}", 'antes': math.nan,
+                    'despues': math.nan, 'bloqueada': False, 'nuevo': True})
 if st.session_state.get('pend_mat') is not None:
     cambios.append({'celda': 'M', 'que': 'Precios de materiales', 'antes': math.nan, 'despues': math.nan,
                     'bloqueada': False, 'materiales': True})
@@ -477,6 +502,58 @@ def _on_materiales():
     st.session_state['pend_mat'] = None if _mat_igual(lista, M_orig) else lista
 
 
+@st.dialog("Producto")
+def dialogo_nuevo(idx=None):
+    """Crear (o editar, si idx) un producto nuevo sin guardar."""
+    previo = pend_nuevos[idx] if idx is not None else None
+    nombre = st.text_input("Nombre", value=previo['nombre'] if previo else '',
+                           placeholder="Ej. Card Holder", max_chars=60)
+    unid = st.number_input("Unidades por caja (para repartir el flete)",
+                           value=float(previo['unid']) if previo else 30.0, min_value=1.0, step=1.0, format='%.0f')
+    datos_prev = {c: (q, pr) for c, q, pr in previo['cueros']} if previo else {}
+    base = pd.DataFrame([{'Cuero': c, 'Incluir': (c in datos_prev) if previo else True,
+                          'Costo proveedor': datos_prev.get(c, (None, None))[0],
+                          'Precio retail': (None if c not in datos_prev or _nan(datos_prev[c][1])
+                                            else datos_prev[c][1])}
+                         for c in P.MULT_CUERO]).astype({'Costo proveedor': float, 'Precio retail': float})
+    tabla = st.data_editor(base, hide_index=True, width='stretch', disabled=['Cuero'], key=f'nuevo_tabla_{idx}',
+                           column_config={
+                               'Incluir': st.column_config.CheckboxColumn(width='small'),
+                               'Costo proveedor': st.column_config.NumberColumn('Costo (USD)', min_value=0.0,
+                                                                                format='$%.2f'),
+                               'Precio retail': st.column_config.NumberColumn('Precio retail', min_value=0.0,
+                                                                              format='$%.0f')})
+    st.markdown("<div class='nota'>Costo del proveedor a la tasa base, igual que los demás productos. Si dejas "
+                "vacío el precio de un cuero que no sea el primero, se calcula con el multiplicador del cuero "
+                "(Ajustes). El empaque arranca en el general. Si lo fabricas tú, guárdalo, ábrelo y cambia a "
+                "<b>Fabricado por mí</b>.</div>", unsafe_allow_html=True)
+    filas = [(r_['Cuero'], r_['Costo proveedor'], r_['Precio retail'])
+             for _, r_ in tabla.iterrows() if r_['Incluir']]
+    errores = []
+    nombre = (nombre or '').strip()
+    existentes = set(prod_orig['Producto']) | {nv['nombre'] for k, nv in enumerate(pend_nuevos) if k != idx}
+    if not nombre:
+        errores.append("Ponle un nombre.")
+    elif nombre.lower() in {x.lower() for x in existentes}:
+        errores.append("Ya hay un producto con ese nombre.")
+    if not filas:
+        errores.append("Marca al menos un cuero.")
+    elif any(_nan(c) for _, c, _ in filas):
+        errores.append("Falta el costo de algún cuero marcado.")
+    elif _nan(filas[0][2]) or not filas[0][2]:
+        errores.append(f"Falta el precio de {filas[0][0]} (el primer cuero marcado).")
+    for e in errores:
+        st.markdown(f"<div class='aviso'>{html.escape(e)}</div>", unsafe_allow_html=True)
+    if st.button("Listo", type='primary', disabled=bool(errores), width='stretch'):
+        nuevo = {'nombre': nombre, 'unid': float(unid),
+                 'cueros': [(c, float(q), math.nan if _nan(pr) else float(pr)) for c, q, pr in filas]}
+        if idx is None:
+            pend_nuevos.append(nuevo)
+        else:
+            pend_nuevos[idx] = nuevo
+        st.rerun()
+
+
 # ── Encabezado ────────────────────────────────────────────────────
 producto_sel = st.session_state.get('producto')
 
@@ -523,13 +600,20 @@ st.markdown("<hr class='rule'>", unsafe_allow_html=True)
 # ── Vista 1: catálogo ─────────────────────────────────────────────
 if not producto_sel:
     productos = list(dict.fromkeys(df['Producto']))
-    buscar = st.text_input("Buscar", placeholder="Buscar producto…", label_visibility='collapsed')
+    nuevos = [nv['nombre'] for nv in pend_nuevos]
+    c_bus, c_nuevo = st.columns([3, 1], vertical_alignment='center')
+    buscar = c_bus.text_input("Buscar", placeholder="Buscar producto…", label_visibility='collapsed')
+    if c_nuevo.button("＋ Nuevo producto", width='stretch'):
+        dialogo_nuevo()
     if buscar:
         productos = [x for x in productos if buscar.lower() in x.lower()]
-    for i, prod in enumerate(productos):
+        nuevos = [x for x in nuevos if buscar.lower() in x.lower()]
+    for i, prod in enumerate(nuevos + productos):
         if i % 3 == 0:
             cols = st.columns(3)
-        g = df[df['Producto'] == prod]
+        es_nuevo = i < len(nuevos)
+        g = (df_nuevos if es_nuevo else df)
+        g = g[g['Producto'] == prod]
         v = g.dropna(subset=['Precio retail', 'Costo variable'])
         if v.empty:
             precio_txt, margen_txt, mcol = 'sin precio', '—', MUTED
@@ -541,12 +625,21 @@ if not producto_sel:
         with cols[i % 3].container(border=True):
             st.markdown(
                 f"<div class='pc-name'>{html.escape(prod)}"
-                f"{CHIP_TALLER if fab_actual(prod) is not None else ''}</div>"
+                f"{CHIP_NUEVO if es_nuevo else CHIP_TALLER if fab_actual(prod) is not None else ''}</div>"
                 f"<div class='pc-row'>Retail <b>{precio_txt}</b></div>"
                 f"<div class='pc-row'>Margen mínimo <b style='color:{mcol}'>{margen_txt}</b></div>"
                 f"<div class='pc-row'>Cueros <b>{len(g)}</b></div>",
                 unsafe_allow_html=True)
-            st.button("Abrir", key=f"open_{i}", on_click=ir, args=(prod,), width='stretch')
+            if es_nuevo:
+                k_ = nuevos.index(prod) if not buscar else [nv['nombre'] for nv in pend_nuevos].index(prod)
+                e1, e2 = st.columns(2)
+                if e1.button("Editar", key=f"edit_new_{k_}", width='stretch'):
+                    dialogo_nuevo(k_)
+                if e2.button("Quitar", key=f"del_new_{k_}", width='stretch'):
+                    pend_nuevos.pop(k_)
+                    st.rerun()
+            else:
+                st.button("Abrir", key=f"open_{i}", on_click=ir, args=(prod,), width='stretch')
 
 
 # ── Vista 2: ficha de producto ────────────────────────────────────
@@ -682,7 +775,7 @@ else:
 
 def _escrituras():
     """(celdas para Modelo, {pestaña auxiliar: grid nuevo} solo las que cambian)."""
-    _especiales = {'empaque', 'fab', 'materiales'}
+    _especiales = {'empaque', 'fab', 'materiales', 'nuevo'}
     datos = [{'range': d['range'], 'values': [[float(v) if v != '' else '' for v in d['values'][0]]]}
              for d in P.payload_escritura([c for c in cambios if not (_especiales & c.keys())])]
     componentes = {k: list(v) for k, v in st.session_state['emp_componentes'].items()}
@@ -704,6 +797,9 @@ def _escrituras():
             filas_c |= {int(f_) for f_ in prod_orig.loc[prod_orig['Producto'] == prod, 'Fila']}
     for f_ in sorted(filas_c):
         datos.append({'range': f'C{f_}', 'values': [[round(float(desglose_fab[f_]['total']), 4)]]})
+    for nv, f0 in _ubicar_nuevos():
+        filas_ = P.filas_producto_nuevo(nv['nombre'], nv['unid'], nv['cueros'], f0)
+        datos.append({'range': f'A{f0}:X{f0 + len(filas_) - 1}', 'values': filas_})
     nuevo_fab = {k: v for k, v in {**F_orig, **pend_fab}.items() if v is not None}
     if pend_fab:
         grids[P.HOJA_FAB] = P.grid_fab(nuevo_fab)
@@ -720,7 +816,7 @@ def _conflictos(sh, ws, datos):
         vals_orig[f"C{int(r_['Fila'])}"] = (r_['_f_C'], r_['Costo proveedor'])
     out = []
     for c in cambios:
-        if {'empaque', 'fab', 'materiales'} & c.keys() or c['bloqueada']:
+        if {'empaque', 'fab', 'materiales', 'nuevo'} & c.keys() or c['bloqueada']:
             continue
         f_, col_ = P.celda_a_rc(c['celda'])
         if P.es_formula(P._get(formulas_ahora, f_, col_)):
@@ -735,6 +831,8 @@ def _conflictos(sh, ws, datos):
             frm_ahora = frm_ahora if P.es_formula(frm_ahora) else ''
             if frm_ahora != frm or (not frm and P._distinto(P.a_numero(P._get(valores_ahora, f_, col_)), val)):
                 out.append(f"{d['range']} cambió en el Sheet")
+    if pend_nuevos and P.ultima_fila_ocupada(valores_ahora) != st.session_state['fila_libre'] - 1:
+        out.append("se agregaron o borraron filas al final de la tabla")
     for nombre, clave_raw in ((P.HOJA_EMPAQUE, 'emp_raw'), (P.HOJA_MATERIALES, 'M_raw'), (P.HOJA_FAB, 'F_raw')):
         if _leer_tab(sh, nombre) != st.session_state[clave_raw]:
             out.append(f"la pestaña {nombre} cambió en el Sheet")
@@ -749,7 +847,7 @@ if cambios:
         def _fmt(c):
             if 'empaque' in c:
                 return f"{c['que']}: {money(c['antes'], 2)} → {money(c['despues'], 2)} ({c['nota']})"
-            if 'fab' in c or 'materiales' in c:
+            if 'fab' in c or 'materiales' in c or 'nuevo' in c:
                 return c['que']
             return f"{c['que']}: {c['antes']:g} → {c['despues']:g}"
         detalle = ' · '.join(_fmt(c) for c in cambios[:3])
@@ -764,6 +862,7 @@ if cambios:
         pend.clear()
         pend_emp.clear()
         pend_fab.clear()
+        pend_nuevos.clear()
         st.session_state['pend_mat'] = None
         st.rerun()
     if s2.button("Guardar en Sheets", type="primary", width='stretch',
@@ -784,6 +883,10 @@ if cambios:
                         ws_aux = sh.add_worksheet(nombre, rows=max(200, len(grid) + 50), cols=len(grid[0]))
                     ws_aux.clear()
                     ws_aux.update(grid, 'A1', value_input_option='RAW')
+                if pend_nuevos:
+                    falta = st.session_state['fila_libre'] + sum(len(nv['cueros']) for nv in pend_nuevos) - 1 - ws.row_count
+                    if falta > 0:
+                        ws.add_rows(falta)
                 if datos:
                     ws.batch_update(datos, value_input_option='USER_ENTERED')
                 _limpiar_widgets()
