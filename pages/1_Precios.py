@@ -92,6 +92,11 @@ button[data-testid^="stBaseButton-secondary"]:hover, .stPopover button:hover {{ 
 .chip.nuevo {{ color:{GREEN}; }}
 .chip {{ display:inline-block; font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:{GOLD}; border:1px solid {LINE}; border-radius:999px; padding:.1rem .55rem; margin-left:.4rem; vertical-align:middle; }}
 .aviso {{ font-size:.78rem; color:{GOLD}; margin:.35rem 0; }}
+table.np {{ width:100%; border-collapse:collapse; font-size:.8rem; margin:.6rem 0 .2rem; }}
+table.np th {{ text-align:right; font-weight:500; color:{MUTED}; font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; padding:.3rem .4rem; border-bottom:1px solid {LINE}; }}
+table.np td {{ text-align:right; padding:.45rem .4rem; border-bottom:1px solid {LINE}; color:{INK}; line-height:1.25; }}
+table.np td em {{ font-style:normal; font-size:.74rem; color:{FAINT}; }}
+table.np td.q {{ text-align:left; }}
 .emp-t {{ font-size:.78rem; letter-spacing:.04em; color:{MUTED}; margin:.9rem 0 .35rem; }}
 @media (max-width: 760px) {{
   .tiers {{ grid-template-columns:repeat(2,1fr); }}
@@ -502,33 +507,59 @@ def _on_materiales():
     st.session_state['pend_mat'] = None if _mat_igual(lista, M_orig) else lista
 
 
-@st.dialog("Producto")
+MARGEN_RETAIL_DEFAULT = 0.70   # supuesto: punto de partida, se cambia en el formulario
+
+
+def precios_por_margen(nombre, unid, costos, margen, fila0):
+    """costos: [(cuero, costo proveedor)]. Precio retail = costo variable ÷ (1 − margen),
+    redondeado a dólar entero como los demás. Devuelve (cueros con precio, df calculado)."""
+    tmp = P.calcular(params_nuevo, P.df_producto_nuevo(nombre, unid, [(c, q, 1.0) for c, q in costos], fila0, p['B7']))
+    cueros = [(c, q, float(P.redondear(cv / (1 - margen))))
+              for (c, q), cv in zip(costos, tmp['Costo variable'])]
+    return cueros, P.calcular(params_nuevo, P.df_producto_nuevo(nombre, unid, cueros, fila0, p['B7']))
+
+
+def tabla_precios_html(d):
+    cols = [('Retail', 'Precio retail', 'Margen retail %'), ('WS 6–24', 'WS 6–24', 'Margen WS 6–24 %'),
+            ('WS 25–49', 'WS 25–49', 'Margen WS 25–49 %'), ('WS 50–99', 'WS 50–99', 'Margen WS 50–99 %'),
+            ('Corp 12–30', 'Corp 12–30', 'Margen Corp 12–30 %'), ('Corp 100–200', 'Corp 100–200',
+                                                                   'Margen Corp 100–200 %')]
+    cab = ''.join(f"<th>{t}</th>" for t, _, _ in cols)
+    filas = ''
+    for _, r_ in d.iterrows():
+        celdas = ''.join(f"<td><b>{money(r_[c])}</b><br><em style='color:{color_m(r_[m])}'>{pct(r_[m])}</em></td>"
+                         for _, c, m in cols)
+        filas += (f"<tr><td class='q'>{html.escape(r_['Cuero'])}<br><em>costo {money(r_['Costo variable'], 2)}"
+                  f"</em></td>{celdas}</tr>")
+    return f"<table class='np'><tr><th></th>{cab}</tr>{filas}</table>"
+
+
+@st.dialog("Nuevo producto", width='large')
 def dialogo_nuevo(idx=None):
-    """Crear (o editar, si idx) un producto nuevo sin guardar."""
+    """Crear (o editar, si idx) un producto nuevo sin guardar: costos primero, precio por margen."""
     previo = pend_nuevos[idx] if idx is not None else None
-    nombre = st.text_input("Nombre", value=previo['nombre'] if previo else '',
-                           placeholder="Ej. Card Holder", max_chars=60)
-    unid = st.number_input("Unidades por caja (para repartir el flete)",
-                           value=float(previo['unid']) if previo else 30.0, min_value=1.0, step=1.0, format='%.0f')
-    datos_prev = {c: (q, pr) for c, q, pr in previo['cueros']} if previo else {}
-    base = pd.DataFrame([{'Cuero': c, 'Incluir': (c in datos_prev) if previo else True,
-                          'Costo proveedor': datos_prev.get(c, (None, None))[0],
-                          'Precio retail': (None if c not in datos_prev or _nan(datos_prev[c][1])
-                                            else datos_prev[c][1])}
-                         for c in P.MULT_CUERO]).astype({'Costo proveedor': float, 'Precio retail': float})
-    tabla = st.data_editor(base, hide_index=True, width='stretch', disabled=['Cuero'], key=f'nuevo_tabla_{idx}',
-                           column_config={
-                               'Incluir': st.column_config.CheckboxColumn(width='small'),
-                               'Costo proveedor': st.column_config.NumberColumn('Costo (USD)', min_value=0.0,
-                                                                                format='$%.2f'),
-                               'Precio retail': st.column_config.NumberColumn('Precio retail', min_value=0.0,
-                                                                              format='$%.0f')})
-    st.markdown("<div class='nota'>Costo del proveedor a la tasa base, igual que los demás productos. Si dejas "
-                "vacío el precio de un cuero que no sea el primero, se calcula con el multiplicador del cuero "
-                "(Ajustes). El empaque arranca en el general. Si lo fabricas tú, guárdalo, ábrelo y cambia a "
-                "<b>Fabricado por mí</b>.</div>", unsafe_allow_html=True)
-    filas = [(r_['Cuero'], r_['Costo proveedor'], r_['Precio retail'])
-             for _, r_ in tabla.iterrows() if r_['Incluir']]
+    a, b = st.columns([2, 1])
+    nombre = a.text_input("Nombre", value=previo['nombre'] if previo else '',
+                          placeholder="Ej. Card Holder", max_chars=60)
+    unid = b.number_input("Unidades por caja", value=float(previo['unid']) if previo else 30.0,
+                          min_value=1.0, step=1.0, format='%.0f', help="Para repartir el flete por unidad")
+    costos_prev = {c: q for c, q, _ in previo['cueros']} if previo else {}
+    cueros = st.pills("Cueros", list(P.MULT_CUERO), selection_mode='multi',
+                      default=list(costos_prev) if previo else ['Vaqueta'], key=f'np_cueros_{idx}') or []
+    cueros = [c for c in P.MULT_CUERO if c in cueros]
+    costos = []
+    if cueros:
+        st.markdown("<div class='emp-t'>Costo del proveedor por unidad (USD, a la tasa base)</div>",
+                    unsafe_allow_html=True)
+        cols_ = st.columns(len(cueros))
+        for col_, c in zip(cols_, cueros):
+            q = col_.number_input(c, value=costos_prev.get(c), min_value=0.0, step=0.5, format='%.2f',
+                                  placeholder='0.00', key=f'np_costo_{idx}_{c}')
+            costos.append((c, q))
+    margen = st.slider("Margen retail que quieres", min_value=10, max_value=90, step=1,
+                       value=int(round((previo or {}).get('margen', MARGEN_RETAIL_DEFAULT) * 100)),
+                       format='%d%%', key=f'np_margen_{idx}') / 100
+
     errores = []
     nombre = (nombre or '').strip()
     existentes = set(prod_orig['Producto']) | {nv['nombre'] for k, nv in enumerate(pend_nuevos) if k != idx}
@@ -536,17 +567,25 @@ def dialogo_nuevo(idx=None):
         errores.append("Ponle un nombre.")
     elif nombre.lower() in {x.lower() for x in existentes}:
         errores.append("Ya hay un producto con ese nombre.")
-    if not filas:
-        errores.append("Marca al menos un cuero.")
-    elif any(_nan(c) for _, c, _ in filas):
-        errores.append("Falta el costo de algún cuero marcado.")
-    elif _nan(filas[0][2]) or not filas[0][2]:
-        errores.append(f"Falta el precio de {filas[0][0]} (el primer cuero marcado).")
+    if not cueros:
+        errores.append("Elige al menos un cuero.")
+    elif any(q is None or q <= 0 for _, q in costos):
+        errores.append("Pon el costo de cada cuero elegido.")
+
+    con_precio = None
+    if cueros and all(q is not None and q > 0 for _, q in costos):
+        con_precio, d = precios_por_margen(nombre or 'nuevo', unid, costos, margen, st.session_state['fila_libre'])
+        st.markdown(tabla_precios_html(d), unsafe_allow_html=True)
+        st.markdown(f"<div class='nota'>Costo = proveedor con ajuste cambiario + empaque general "
+                    f"({money(p['B7'], 2)}) + flete ({money(p['B8'])} ÷ {unid:.0f} und) + arancel. "
+                    "Wholesale y corporativo salen del retail con los % de Ajustes. El retail se redondea "
+                    "a dólar entero; después lo puedes ajustar en la ficha.</div>", unsafe_allow_html=True)
     for e in errores:
         st.markdown(f"<div class='aviso'>{html.escape(e)}</div>", unsafe_allow_html=True)
-    if st.button("Listo", type='primary', disabled=bool(errores), width='stretch'):
-        nuevo = {'nombre': nombre, 'unid': float(unid),
-                 'cueros': [(c, float(q), math.nan if _nan(pr) else float(pr)) for c, q, pr in filas]}
+    if st.button("Agregar producto" if idx is None else "Actualizar", type='primary',
+                 disabled=bool(errores), width='stretch'):
+        nuevo = {'nombre': nombre, 'unid': float(unid), 'margen': margen,
+                 'cueros': [(c, float(q), float(pr)) for c, q, pr in con_precio]}
         if idx is None:
             pend_nuevos.append(nuevo)
         else:
