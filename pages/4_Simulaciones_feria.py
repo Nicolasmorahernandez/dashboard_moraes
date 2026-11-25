@@ -119,30 +119,115 @@ unid_tot = sum(i['stock'] for i in items)
 inv_venta = sum(i['stock'] * i['precio'] for i in items)
 inv_costo = sum(i['stock'] * i['costo'] for i in items)
 
+
+# ── Guardado en la pestaña «Simulador feria» ──────────────────────
+HOJA_SIM = 'Simulador feria'
+NOMBRES_GASTO = ['Stand / inscripción', 'Transporte', 'Comida', 'Ayuda / Valentina', 'Publicidad y otros']
+_ESC = [('% vendido', 'sim_v', int), ('Descuento %', 'sim_d', int), ('% con tarjeta', 'sim_t', int),
+        ('Comisión tarjeta %', 'sim_c', float), ('Otros % de ventas', 'sim_o', float)]
+
+
+def _num(x, d=0.0):
+    try:
+        return float(str(x).replace(',', '.'))
+    except ValueError:
+        return d
+
+
+def _aplicar(grid):
+    """Pone en session_state lo guardado en la pestaña (escenario, gastos y combos)."""
+    seccion = None
+    gastos, combos_g = [], []
+    for f in grid:
+        f = list(f) + [''] * 4
+        a = str(f[0]).strip()
+        if a in ('Escenario', 'Gasto', 'Combo'):
+            seccion = a
+            continue
+        if not a:
+            continue
+        if seccion == 'Escenario':
+            for et, k, tipo in _ESC:
+                if a == et:
+                    st.session_state[k] = tipo(_num(f[1]))
+            if a == 'Contar todo el inventario':
+                st.session_state['sim_todo'] = bool(_num(f[1], 1))
+        elif seccion == 'Gasto':
+            gastos.append((a, _num(f[1])))
+        elif seccion == 'Combo':
+            combos_g.append((a, str(f[1]), _num(f[2], 15), int(_num(f[3], 1))))
+    if gastos:
+        st.session_state['sim_ng'] = len(gastos)
+        for n, (nom, m) in enumerate(gastos):
+            st.session_state[f'sim_gn{n}'], st.session_state[f'sim_gm{n}'] = nom, m
+    st.session_state['sim_ncombos'] = len(combos_g)
+    for n, (nom, prods, dc, cant) in enumerate(combos_g):
+        sel = []
+        for parte in [x for x in prods.split(' + ') if x.strip()]:
+            et, _, q = parte.rpartition('×')
+            et = et.strip()
+            if et in inv_etq:
+                sel.append((et, int(_num(q, 1))))
+        st.session_state[f'sim_cn{n}'], st.session_state[f'sim_cd{n}'], st.session_state[f'sim_cq{n}'] = nom, int(dc), cant
+        st.session_state[f'sim_cs{n}'] = [e for e, _ in sel]
+        for j, (_, q) in enumerate(sel):
+            st.session_state[f'sim_cu{n}_{j}'] = q
+
+
+def _grid_actual():
+    g = [['Escenario', 'Valor']]
+    g += [[et, st.session_state[k]] for et, k, _ in _ESC]
+    g += [['Contar todo el inventario', 1 if st.session_state.get('sim_todo', True) else 0], [], ['Gasto', 'Monto']]
+    for n in range(st.session_state['sim_ng']):
+        g.append([st.session_state.get(f'sim_gn{n}', ''), st.session_state.get(f'sim_gm{n}', 0.0)])
+    g += [[], ['Combo', 'Productos', 'Descuento %', 'Cantidad']]
+    for n in range(st.session_state['sim_ncombos']):
+        sel = st.session_state.get(f'sim_cs{n}', [])
+        prods = ' + '.join(f"{e}×{st.session_state.get(f'sim_cu{n}_{j}', 1)}" for j, e in enumerate(sel))
+        g.append([st.session_state.get(f'sim_cn{n}', f'Combo {n + 1}'), prods,
+                  st.session_state.get(f'sim_cd{n}', 15), st.session_state.get(f'sim_cq{n}', 0)])
+    return g
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _leer_guardado(_sid, _v):
+    try:
+        return autenticar().open_by_key(_sid).worksheet(HOJA_SIM).get_all_values()
+    except WorksheetNotFound:
+        return []
+
+
+if 'sim_init' not in st.session_state:
+    st.session_state['sim_init'] = True
+    for k, v in {'sim_v': 70, 'sim_d': int(round(cfg['desc_max'] * 100)), 'sim_t': 40, 'sim_c': 3.0,
+                 'sim_o': 0.0, 'sim_todo': True, 'sim_ng': len(NOMBRES_GASTO), 'sim_ncombos': 0}.items():
+        st.session_state.setdefault(k, v)
+    for n, nom in enumerate(NOMBRES_GASTO):
+        st.session_state.setdefault(f'sim_gn{n}', nom)
+        st.session_state.setdefault(f'sim_gm{n}', float(cfg['otros_gastos']) if n == len(NOMBRES_GASTO) - 1 else 0.0)
+    _g = _leer_guardado(SHEET_ID, st.session_state.get('sim_ver', 0))
+    if _g:
+        _aplicar(_g)
+
 # ── Escenario ─────────────────────────────────────────────────────
 st.markdown("<div class='sec'>Escenario</div>", unsafe_allow_html=True)
 c1, c2, c3, c4 = st.columns(4)
-vend = c1.slider("% del inventario que se vende", 0, 100, 70, 5, key='sim_v',
+vend = c1.slider("% del inventario que se vende", 0, 100, step=5, key='sim_v',
                  help="Aplica a las unidades que no van en combos.")
-desc = c2.slider("Descuento general %", 0, 50, int(round(cfg['desc_max'] * 100)), 1, key='sim_d',
+desc = c2.slider("Descuento general %", 0, 50, step=1, key='sim_d',
                  help="Se aplica al precio de lista de todo lo que se vende suelto.")
-tarj = c3.slider("% de ventas con tarjeta", 0, 100, 40, 5, key='sim_t')
-comi = c4.number_input("Comisión de tarjeta %", 0.0, 10.0, 3.0, 0.1, key='sim_c')
+tarj = c3.slider("% de ventas con tarjeta", 0, 100, step=5, key='sim_t')
+comi = c4.number_input("Comisión de tarjeta %", 0.0, 10.0, step=0.1, key='sim_c')
 
 # ── Gastos administrativos ────────────────────────────────────────
 st.markdown("<div class='sec'>Gastos administrativos de la feria</div>", unsafe_allow_html=True)
 st.markdown("<div class='nota'>Todo lo que cuesta estar en la feria y no es producto. Pon el monto de cada concepto.</div>",
             unsafe_allow_html=True)
-NOMBRES_GASTO = ['Stand / inscripción', 'Transporte', 'Comida', 'Ayuda / Valentina', 'Publicidad y otros']
-if 'sim_ng' not in st.session_state:
-    st.session_state['sim_ng'] = len(NOMBRES_GASTO)
 fijos = 0.0
 for n in range(st.session_state['sim_ng']):
     g1_, g2_ = st.columns([3, 1.5])
-    g1_.text_input("Concepto", value=NOMBRES_GASTO[n] if n < len(NOMBRES_GASTO) else f"Gasto {n + 1}",
-                   key=f'sim_gn{n}', label_visibility='collapsed')
-    fijos += g2_.number_input("Monto ($)", 0.0, value=float(cfg['otros_gastos']) if n == len(NOMBRES_GASTO) - 1 else 0.0,
-                              step=5.0, key=f'sim_gm{n}', label_visibility='collapsed')
+    g1_.text_input("Concepto", key=f'sim_gn{n}', label_visibility='collapsed')
+    fijos += g2_.number_input("Monto ($)", 0.0, step=5.0, key=f'sim_gm{n}', label_visibility='collapsed')
 h1, h2, h3 = st.columns([1, 1, 4], vertical_alignment='center')
 if h1.button("＋ Gasto", width='stretch'):
     st.session_state['sim_ng'] += 1
@@ -151,15 +236,13 @@ if h2.button("Quitar último ", width='stretch', disabled=st.session_state['sim_
     st.session_state['sim_ng'] -= 1
     st.rerun()
 h3.markdown(f"<div class='nota' style='margin:0'>Total gastos fijos: <b>{money(fijos, 2)}</b></div>", unsafe_allow_html=True)
-otros_pct = st.number_input("Otros gastos como % de las ventas (empaque de regalo, impuestos…)", 0.0, 30.0, 0.0, 0.5,
+otros_pct = st.number_input("Otros gastos como % de las ventas (empaque de regalo, impuestos…)", 0.0, 30.0, step=0.5,
                             key='sim_o') / 100
 
 # ── Combos ────────────────────────────────────────────────────────
 st.markdown("<div class='sec'>Combos</div>", unsafe_allow_html=True)
 st.markdown("<div class='nota'>Arma paquetes con descuento. Los combos se llevan primero las unidades del inventario y "
             "el resto se vende suelto con el % de arriba.</div>", unsafe_allow_html=True)
-if 'sim_ncombos' not in st.session_state:
-    st.session_state['sim_ncombos'] = 0
 b1, b2, _ = st.columns([1, 1, 4])
 if b1.button("＋ Agregar combo", width='stretch'):
     st.session_state['sim_ncombos'] += 1
@@ -169,20 +252,46 @@ combos = []
 for n in range(st.session_state['sim_ncombos']):
     with st.container(border=True):
         a, b, c, d = st.columns([2.2, 2.6, 1, 1])
-        nom = a.text_input("Nombre", value=f"Combo {n + 1}", key=f'sim_cn{n}')
+        st.session_state.setdefault(f'sim_cn{n}', f"Combo {n + 1}")
+        nom = a.text_input("Nombre", key=f'sim_cn{n}')
         sel = [inv_etq[x] for x in b.multiselect("Productos", list(inv_etq), key=f'sim_cs{n}')]
-        dc = c.number_input("Descuento %", 0, 60, 15, 1, key=f'sim_cd{n}')
-        cant = d.number_input("Combos vendidos", 0, 500, 10, 1, key=f'sim_cq{n}')
+        st.session_state.setdefault(f'sim_cd{n}', 15)
+        st.session_state.setdefault(f'sim_cq{n}', 10)
+        dc = c.number_input("Descuento %", 0, 60, step=1, key=f'sim_cd{n}')
+        cant = d.number_input("Combos vendidos", 0, 500, step=1, key=f'sim_cq{n}')
         partes = []
         if sel:
             cols = st.columns(min(len(sel), 4))
             for j, k in enumerate(sel):
-                q = cols[j % len(cols)].number_input(f"Unid. de {etq[k]}", 1, 10, 1, 1, key=f'sim_cu{n}_{j}')
+                st.session_state.setdefault(f'sim_cu{n}_{j}', 1)
+                q = cols[j % len(cols)].number_input(f"Unid. de {etq[k]}", 1, 10, step=1, key=f'sim_cu{n}_{j}')
                 partes.append((k, q))
         combos.append({'nombre': nom, 'partes': partes, 'desc': dc / 100, 'cantidad': cant})
 
+s1, s2, _s = st.columns([1.3, 1.3, 3.4], vertical_alignment='center')
+if s1.button("Guardar simulación", type='primary', width='stretch'):
+    try:
+        _sh = autenticar().open_by_key(SHEET_ID)
+        try:
+            _ws = _sh.worksheet(HOJA_SIM)
+        except WorksheetNotFound:
+            _ws = _sh.add_worksheet(HOJA_SIM, rows=100, cols=6)
+        _ws.clear()
+        _ws.update(_grid_actual(), 'A1', value_input_option='RAW')
+        _leer_guardado.clear()
+        _s.success("Guardado en la pestaña «Simulador feria» del Sheet.")
+    except (APIError, PermissionError) as e:
+        _s.error(f"No pude guardar: {e}")
+if s2.button("Recargar lo guardado", width='stretch'):
+    _leer_guardado.clear()
+    _g = _leer_guardado(SHEET_ID, 0)
+    if _g:
+        _aplicar(_g)
+        st.rerun()
+    _s.info("Todavía no hay nada guardado.")
+
 # ── Resultado ─────────────────────────────────────────────────────
-todo = st.toggle("Contar todo el inventario como costo, se venda o no", value=True, key='sim_todo',
+todo = st.toggle("Contar todo el inventario como costo, se venda o no", key='sim_todo',
                  help="Todo se compró o fabricó para la feria: lo que no se vende ya está pagado.")
 kw = dict(costear_todo=todo, gastos_fijos=fijos, pct_tarjeta=tarj / 100, comision=comi / 100, otros_pct=otros_pct, combos=combos)
 r = S.simular(items, vend / 100, desc / 100, **kw)
