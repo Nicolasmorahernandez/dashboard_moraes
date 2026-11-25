@@ -51,6 +51,15 @@ button[kind="secondary"]:hover {{ border-color:{ACENTO} !important; color:{ACENT
 /* Campos */
 [data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="input"] input, [data-testid="stNumberInputContainer"] {{
     background:{CARD} !important; color:{INK} !important; border-color:{LINE} !important; }}
+[data-testid="stSelectbox"] div, [data-testid="stMultiSelect"] div, [data-baseweb="select"] div {{ background-color:{CARD} !important; border-color:{LINE} !important; color:{INK} !important; }}
+[data-testid="stSelectbox"] *, [data-testid="stMultiSelect"] div, [data-testid="stMultiSelect"] input, [data-baseweb="select"] *, [data-baseweb="select"] input {{ color:{INK} !important; -webkit-text-fill-color:{INK} !important; }}
+[data-baseweb="select"] svg {{ fill:{MUTED} !important; }}
+[data-baseweb="select"] [data-baseweb="tag"], [data-baseweb="tag"] {{ background-color:#f4e2d4 !important; }}
+[data-baseweb="tag"] * {{ color:{ACENTO} !important; -webkit-text-fill-color:{ACENTO} !important; }}
+[data-baseweb="popover"] ul, [data-baseweb="popover"] li, [data-baseweb="menu"], [role="listbox"], [role="option"] {{
+    background:{CARD} !important; color:{INK} !important; }}
+[role="option"]:hover, [role="option"][aria-selected="true"] {{ background:#f4e2d4 !important; }}
+[data-testid="stPopoverBody"] {{ background:{CARD} !important; color:{INK} !important; border:1px solid {LINE}; }}
 [data-testid="stTextInputRootElement"] {{ background:{CARD} !important; border-color:{LINE} !important; }}
 .stApp input {{ background:transparent !important; color:{INK} !important; -webkit-text-fill-color:{INK} !important;
     font-size:1.05rem; opacity:1 !important; }}

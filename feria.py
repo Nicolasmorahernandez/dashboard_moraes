@@ -118,6 +118,7 @@ CATALOGO_SEMILLA = {
     'Bolsa negra': 0.0,                 # 50 piezas
     'Caja verde (5231)': 0.0,           # 130 cajas
     'Bolsa de yute 10×15': 0.0,         # 90 piezas
+    'Logo (estampado o sticker)': 0.0,
 }
 # Qué empaque lleva cada producto, según las notas en rojo del PDF del pedido
 DESPIECE_SEMILLA = {
@@ -340,7 +341,7 @@ SEMILLA = {
     ('Golf Glove Case', 'Crazy Horse'): 45,
     ('Scorecard Holder', 'Crazy Horse'): 10, ('Scorecard Holder', 'Vaqueta hoja seca'): 10,
     ('Scorecard Holder', 'Vaqueta negra'): 5,
-    ('Duffle', 'Vaqueta hoja seca'): 3,
+    ('Duffle', 'Vaqueta hoja seca'): 5, ('Duffle', 'Crazy Horse'): 5,
     ('Padfolio', 'Vaqueta hoja seca'): 3,
     ('Luggage Tag', 'Napa verde'): 5, ('Luggage Tag', 'Napa azul'): 5, ('Luggage Tag', 'Vaqueta hoja seca'): 10,
     ('Luggage Tag', 'Vaqueta negra'): 10, ('Luggage Tag', 'Vaqueta café'): 10,
