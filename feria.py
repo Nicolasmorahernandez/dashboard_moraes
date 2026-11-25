@@ -128,7 +128,6 @@ DESPIECE_SEMILLA = {
     'Toiletry Bag Deluxe': [('Bolsa negra', 1)],
     'Golf Glove Case': [('Caja verde (5231)', 1)],
     'Scorecard Holder': [('Caja verde (5231)', 1)],
-    'Everyday Glove Case': [('Caja verde (5231)', 1)],
     'Luggage Tag': [('Bolsa de yute 10×15', 1)],
     'Money Clip Wallet': [('Bolsa de yute 10×15', 1)],
 }
@@ -303,7 +302,7 @@ def fila_venta(fecha, hora, feria, producto, cuero, cantidad, precio, desc_pct, 
 # Supuesto: Valuables Pouch = cognac-golf-pouch-01-hero.
 FOTOS = {
     'Golf Glove Case': 'everyday-glove-case.webp',
-    'Everyday Glove Case': 'golf-glove-case.webp',
+    
     'Drawstring Pouch': 'drawstring-pouch.webp',
     'Valuables Pouch': 'valuables-pouch.webp',
     'Notebook / Planner Cover': 'planner-cover.webp',
@@ -326,7 +325,7 @@ FOTOS = {
 
 # Inventario inicial de la primera feria (29 nov 2026), de la lista a mano de Nicolás.
 # Códigos del proveedor (pestaña Pedidos_Proveedor, pedido OCT-2026-07 "feria - stock"):
-# 434 Wine Deluxe, 5252 Wine Dual, 432 Wine Single, 111 Everyday Glove Case (supuesto),
+# 434 Wine Deluxe, 5252 Wine Dual, 432 Wine Single, 111 producto nuevo sin nombre,
 # 417 Toiletry Bag (supuesto), 5231 Golf Glove Case, 4854 Scorecard Holder, 308 Duffle,
 # 600 Padfolio, 4807 Luggage Tag, 4710 Money Clip Wallet (supuesto).
 # HS = vaqueta hoja seca, Ø = negra. Productos nuevos (aún sin fila en la hoja Modelo; precio y
@@ -336,7 +335,7 @@ SEMILLA = {
     ('Wine Deluxe', 'Vaqueta hoja seca'): 5, ('Wine Deluxe', 'Vaqueta café'): 5, ('Wine Deluxe', 'Vaqueta negra'): 5,
     ('Wine Dual', 'Vaqueta hoja seca'): 10, ('Wine Dual', 'Vaqueta café'): 5, ('Wine Dual', 'Vaqueta negra'): 5,
     ('Wine Single', 'Vaqueta hoja seca'): 5, ('Wine Single', 'Vaqueta café'): 5,
-    ('Everyday Glove Case', 'Crazy Horse'): 19, ('Everyday Glove Case', 'Vaqueta hoja seca'): 19,
+    ('Producto nuevo 111', 'Crazy Horse'): 19, ('Producto nuevo 111', 'Vaqueta hoja seca'): 19,
     ('Toiletry Bag', 'Vaqueta hoja seca'): 5, ('Toiletry Bag', 'Crazy Horse'): 4,
     ('Golf Glove Case', 'Crazy Horse'): 45,
     ('Scorecard Holder', 'Crazy Horse'): 10, ('Scorecard Holder', 'Vaqueta hoja seca'): 10,
@@ -353,4 +352,4 @@ SEMILLA = {
     ('Luxury Keychain', 'Azul oscuro'): 7,
 }
 # Código del proveedor de los productos nuevos
-CODIGOS_NUEVOS = {'Leather Notebook Cover Midori': '1032', 'Luxury Keychain': '9898'}
+CODIGOS_NUEVOS = {'Producto nuevo 111':'111', 'Leather Notebook Cover Midori': '1032', 'Luxury Keychain': '9898'}
