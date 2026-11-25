@@ -812,18 +812,6 @@ else:
             st.markdown("<div class='nota'>El precio de este cuero sale de una fórmula del Sheet (precio base × "
                         "multiplicador). Si escribes un precio aquí, al guardar reemplaza la fórmula.</div>",
                         unsafe_allow_html=True)
-        _niv_abierto = any(not _nan(o[P.col_o(n_)]) or f'{l_}{fila}' in pend for n_, (l_, _) in P.NIVELES.items())
-        with st.expander("Precios por volumen (wholesale y corporativo)", expanded=_niv_abierto):
-            st.markdown("<div class='nota'>Por defecto salen del retail con los % de Ajustes. Escribe un precio "
-                        "para fijarlo en este producto y cuero; déjalo vacío para que siga el %.</div>",
-                        unsafe_allow_html=True)
-            _nc = st.columns(2)
-            for _i, (_n, (_l, _c)) in enumerate(P.NIVELES.items()):
-                with _nc[_i % 2]:
-                    entrada(f'{_l}{fila}', _n.replace('WS', 'Wholesale').replace('Corp', 'Corporativo') + ' (USD)',
-                            o[P.col_o(_n)], False, fmt='%.0f', step=1.0,
-                            placeholder=f"{money(r[_n])} (según {p[_c]:.0%})",
-                            ayuda=f"Celda {_l}{fila} · vacío = fórmula ({p[_c]:.0%} del retail)")
         bloque_empaque(producto_sel)
         if fila in desglose_fab:
             _d = desglose_fab[fila]
@@ -893,6 +881,19 @@ else:
             f"<div class='ln total'><span>Costo variable por unidad</span><span>{money(costo, 2)}</span></div>"
             "</div>", unsafe_allow_html=True)
 
+    def _editar_niveles(nombres):
+        """Casillas para fijar a mano el precio de cada nivel (vacío = sigue el % de Ajustes)."""
+        st.markdown("<div class='nota'>Fija un precio para este producto y cuero, o déjalo vacío para que siga "
+                    "el % de Ajustes.</div>", unsafe_allow_html=True)
+        cols_ = st.columns(len(nombres))
+        for col_, n_ in zip(cols_, nombres):
+            l_, c_ = P.NIVELES[n_]
+            with col_:
+                entrada(f'{l_}{fila}', n_.replace('WS', 'Wholesale').replace('Corp', 'Corporativo') + ' (USD)',
+                        o[P.col_o(n_)], False, fmt='%.0f', step=1.0,
+                        placeholder=f"{money(r[n_])} ({p[c_]:.0%})",
+                        ayuda=f"Celda {l_}{fila} · vacío = fórmula ({p[c_]:.0%} del retail)")
+
     # Precios por volumen
     st.markdown("")
     def _tarjetas(tiers):
@@ -915,6 +916,7 @@ else:
         f"<div class='nota'>Wholesale = {p['B10']:.0%} / {p['B11']:.0%} / {p['B12']:.0%} del retail. "
         f"{'' if _nan(und) else f'A precio WS 6–24 necesitas ~{und:,.0f} und/mes para cubrir {fijos} de fijos.'}</div>"
         "</div>", unsafe_allow_html=True)
+    _editar_niveles(['WS 6–24', 'WS 25–49', 'WS 50–99'])
     st.markdown("")
     st.markdown(
         "<div class='panel'><div class='panel-t'>Corporativo</div>"
@@ -922,6 +924,7 @@ else:
         f"<div class='nota'>Corporativo = {p['B13']:.0%} / {p['B14']:.0%} / {p['B15']:.0%} / {p['E15']:.0%} del retail "
         f"(se cambian en Ajustes). Retail ideal (4× costo): <b>{money(r['Retail ideal (4× costo)'])}</b>.</div>"
         "</div>", unsafe_allow_html=True)
+    _editar_niveles(['Corp 12–30', 'Corp 31–60', 'Corp 61–99', 'Corp 100–200'])
 
 
 # ── Barra de guardado (solo si hay cambios) ───────────────────────
