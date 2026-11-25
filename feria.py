@@ -256,7 +256,9 @@ FOTOS = {
 # 434 Wine Deluxe, 5252 Wine Dual, 432 Wine Single, 111 Everyday Glove Case (supuesto),
 # 417 Toiletry Bag (supuesto), 5231 Golf Glove Case, 4854 Scorecard Holder, 308 Duffle,
 # 600 Padfolio, 4807 Luggage Tag, 4710 Money Clip Wallet (supuesto).
-# HS = vaqueta hoja seca, Ø = negra. Sin identificar todavía: 1032, 9897, 9898.
+# HS = vaqueta hoja seca, Ø = negra. Productos nuevos (aún sin fila en la hoja Modelo; precio y
+# costos se ponen en Precios feria): 1032 Leather Notebook Cover Midori, 9898 Luxury Keychain.
+# 9897 (A5 cover) no va a la feria.
 SEMILLA = {
     ('Wine Deluxe', 'Vaqueta hoja seca'): 5, ('Wine Deluxe', 'Vaqueta café'): 5, ('Wine Deluxe', 'Vaqueta negra'): 5,
     ('Wine Dual', 'Vaqueta hoja seca'): 10, ('Wine Dual', 'Vaqueta café'): 5, ('Wine Dual', 'Vaqueta negra'): 5,
@@ -272,4 +274,10 @@ SEMILLA = {
     ('Luggage Tag', 'Vaqueta negra'): 10, ('Luggage Tag', 'Vaqueta café'): 10,
     ('Money Clip Wallet', 'Vaqueta negra'): 10, ('Money Clip Wallet', 'Crazy Horse'): 10,
     ('Money Clip Wallet', 'Vaqueta hoja seca'): 10,
+    ('Leather Notebook Cover Midori', 'Hampton'): 8, ('Leather Notebook Cover Midori', 'Azul'): 4,
+    ('Leather Notebook Cover Midori', 'Café'): 1,
+    ('Luxury Keychain', 'Hampton'): 15, ('Luxury Keychain', 'Azul cuadros'): 12,
+    ('Luxury Keychain', 'Azul oscuro'): 7,
 }
+# Código del proveedor de los productos nuevos
+CODIGOS_NUEVOS = {'Leather Notebook Cover Midori': '1032', 'Luxury Keychain': '9898'}

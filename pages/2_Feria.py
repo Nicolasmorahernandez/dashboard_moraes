@@ -110,7 +110,7 @@ cfg, stock = st.session_state['cfg'], st.session_state['stock']
 precios = {}
 for _k in set(stock) | set(st.session_state.get('ajustes', {})):
     _v = F.valores_feria(base, st.session_state.get('ajustes', {}), _k)
-    if not math.isnan(_v['precio']):
+    if not math.isnan(_v['precio']) and _v['precio'] > 0:
         precios[_k] = (_v['precio'], F.resultado(_v, cfg)['costo_total'])
 ventas = st.session_state['ventas']
 vend = F.vendidos(ventas, cfg['feria'])

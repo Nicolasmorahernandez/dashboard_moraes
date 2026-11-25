@@ -154,8 +154,8 @@ cfg = {'feria': nombre.strip() or 'Feria', 'desc_max': dmax / 100, 'margen_min':
        'otros_gastos': float(otros)}
 
 items = st.session_state.setdefault('pf_items', [])
-claves = [k for k in items if F.base_de(base, k)]
-sin_hoja = [k for k in items if not F.base_de(base, k)]
+claves = list(items)
+nuevos = {p for p, _ in items if not any(F.base_de(base, k) for k in items if k[0] == p)}
 
 # Valores actuales (widgets) por producto/cuero
 for k in claves:
@@ -207,19 +207,24 @@ st.markdown(f"<div class='resumen'><span>Llevas <b>{r['unidades']}</b> und</span
 if pf.get('semilla'):
     st.markdown("<div class='aviso'>Esto es tu lista a mano, todavía sin guardar. Revisa unidades y valores "
                 "y dale <b>Guardar feria</b> abajo.</div>", unsafe_allow_html=True)
-if sin_hoja:
-    st.markdown("<div class='aviso'>No encontré en la hoja de precios: "
-                + ', '.join(html.escape(f'{p} {c}') for p, c in sin_hoja) + "</div>", unsafe_allow_html=True)
+if nuevos:
+    st.markdown("<div class='aviso'>Productos nuevos (aún no están en la hoja de precios): "
+                + ', '.join(html.escape(p) for p in sorted(nuevos))
+                + ". Ponles precio y costos aquí; mientras el precio esté en 0, Valentina no los ve.</div>",
+                unsafe_allow_html=True)
 
 # ── Agregar producto ──────────────────────────────────────────────
 with st.expander("Agregar producto o color"):
     a1, a2, a3, a4 = st.columns([2, 1.2, 1.2, 1], vertical_alignment='bottom')
-    n_prod = a1.selectbox("Producto", productos, key='pf_n_prod')
+    _todos = productos + sorted({p for p, _ in items} - set(productos)) + ['＋ Producto nuevo…']
+    n_prod = a1.selectbox("Producto", _todos, key='pf_n_prod')
+    if n_prod == '＋ Producto nuevo…':
+        n_prod = a1.text_input("Nombre del producto nuevo", key='pf_n_nuevo').strip()
     n_cuero = a2.selectbox("Cuero", F.CUEROS_HOJA, key='pf_n_cuero')
     n_color = a3.text_input("Color (opcional)", placeholder="negra, café, azul…", key='pf_n_color')
     if a4.button("Agregar", width='stretch'):
         var = f"{n_cuero} {n_color.strip()}".strip()
-        if (n_prod, var) not in items:
+        if n_prod and (n_prod, var) not in items:
             items.append((n_prod, var))
         st.rerun()
 
@@ -230,7 +235,10 @@ for prod in list(dict.fromkeys(p for p, _ in claves)):
         a, b = st.columns([1, 6], gap='medium')
         a.markdown(foto_mini(prod), unsafe_allow_html=True)
         with b:
-            st.markdown(f"<p class='pn'>{html.escape(prod)}</p>", unsafe_allow_html=True)
+            _cod = F.CODIGOS_NUEVOS.get(prod)
+            st.markdown(f"<p class='pn'>{html.escape(prod)}"
+                        f"{f' <span class=aj>· NUEVO · cód. {_cod}</span>' if _cod else (' <span class=aj>· NUEVO</span>' if prod in nuevos else '')}"
+                        "</p>", unsafe_allow_html=True)
             for k in [k for k in claves if k[0] == prod]:
                 v = {c: float(st.session_state[_k(c, k)]) for c in F.CAMPOS}
                 res = F.resultado(v, cfg)
