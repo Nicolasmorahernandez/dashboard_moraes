@@ -11,6 +11,7 @@ import html
 import math
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 from gspread.utils import ValueRenderOption
@@ -87,8 +88,15 @@ def cargar_feria():
     semilla = not stock and not ajustes
     if semilla:                      # primera vez: la lista a mano de Nicolás, sin guardar
         stock = dict(F.SEMILLA)
+    emp_cat, emp_desp = F.parsear_empaques(grid)
+    emp_semilla = emp_cat is None and emp_desp is None
+    if emp_cat is None:              # todavía sin empaques guardados: los del pedido, costos en 0
+        emp_cat = dict(F.CATALOGO_SEMILLA)
+    if emp_desp is None:
+        emp_desp = {p: list(v) for p, v in F.DESPIECE_SEMILLA.items()}
     st.session_state['pf'] = {'cfg': cfg, 'stock': stock, 'ajustes': ajustes, 'ferias_con_ventas': hay_ventas,
-                              'semilla': semilla}
+                              'semilla': semilla, 'emp_cat': emp_cat, 'emp_desp': emp_desp,
+                              'emp_semilla': emp_semilla}
     for k in [k for k in st.session_state if k.startswith('pf_')]:
         del st.session_state[k]
     st.session_state['pf_items'] = list(dict.fromkeys(list(stock) + list(ajustes)))
@@ -194,6 +202,67 @@ with st.expander("Repartir el envío del lote"):
             st.session_state[_k('envio', k)] = round(v, 2)
         st.rerun()
 
+# ── Empaques de la feria (despiece) ───────────────────────────────
+prods_feria = list(dict.fromkeys(p for p, _ in claves))
+with st.expander("Empaques de la feria (despiece)", expanded=bool(pf.get('emp_semilla'))):
+    st.markdown("<div class='nota'>Pon el costo por unidad de cada empaque y qué lleva cada producto "
+                "(puede llevar varios: bolsa + caja + marquilla…). El <b>Empaque</b> de cada producto se "
+                "calcula solo con este despiece cada vez que lo cambias; después lo puedes corregir a mano. "
+                "Productos sin despiece se quedan con su empaque de siempre.</div>", unsafe_allow_html=True)
+    e1, e2 = st.columns([1, 1.5], gap='medium')
+    with e1:
+        st.markdown("<div class='fila-c'>Empaques y costo por unidad</div>", unsafe_allow_html=True)
+        cat_df = st.data_editor(
+            pd.DataFrame([{'Empaque': n, 'Costo unidad': float(c)} for n, c in pf['emp_cat'].items()],
+                         columns=['Empaque', 'Costo unidad']),
+            key='pf_emp_cat', num_rows='dynamic', hide_index=True, width='stretch',
+            column_config={'Empaque': st.column_config.TextColumn(required=True),
+                           'Costo unidad': st.column_config.NumberColumn("Costo por unidad", min_value=0.0,
+                                                                         format='$%.2f', default=0.0)})
+    catalogo = {}
+    for _, row in cat_df.iterrows():
+        n = row['Empaque']
+        if isinstance(n, str) and n.strip():
+            catalogo[n.strip()] = 0.0 if pd.isna(row['Costo unidad']) else float(row['Costo unidad'])
+    with e2:
+        st.markdown("<div class='fila-c'>Qué empaque lleva cada producto (por unidad)</div>",
+                    unsafe_allow_html=True)
+        _filas = [{'Producto': p, 'Empaque': e, 'Cantidad': float(q)}
+                  for p, partes in pf['emp_desp'].items() for e, q in partes]
+        desp_df = st.data_editor(
+            pd.DataFrame(_filas, columns=['Producto', 'Empaque', 'Cantidad']),
+            key='pf_emp_desp', num_rows='dynamic', hide_index=True, width='stretch',
+            column_config={
+                'Producto': st.column_config.SelectboxColumn(
+                    options=list(dict.fromkeys(prods_feria + list(pf['emp_desp']))), required=True),
+                'Empaque': st.column_config.SelectboxColumn(
+                    options=list(dict.fromkeys(list(catalogo) + list(pf['emp_cat']))), required=True),
+                'Cantidad': st.column_config.NumberColumn(min_value=0.0, step=1.0, format='%g', default=1.0)})
+    despiece = {}
+    for _, row in desp_df.iterrows():
+        p_, e_ = row['Producto'], row['Empaque']
+        if isinstance(p_, str) and p_.strip() and isinstance(e_, str) and e_.strip():
+            q_ = 1.0 if pd.isna(row['Cantidad']) else float(row['Cantidad'])
+            despiece.setdefault(p_.strip(), []).append((e_.strip(), q_))
+    emp_total = {p: F.empaque_por_despiece(catalogo, partes) for p, partes in despiece.items()}
+    _sin_costo = sorted({e for partes in despiece.values() for e, _ in partes if not catalogo.get(e)})
+    if _sin_costo:
+        st.markdown("<div class='aviso'>Falta el costo de: " + ', '.join(html.escape(e) for e in _sin_costo)
+                    + ". Mientras esté en 0, no suma al empaque.</div>", unsafe_allow_html=True)
+
+# Cuando cambia el despiece (o el costo de un empaque) de un producto, su Empaque se recalcula
+# en todos sus colores. Al cargar no se toca nada: se respeta lo guardado.
+_firma = {p: tuple((e, round(q, 4), round(catalogo.get(e, 0.0), 4)) for e, q in partes)
+          for p, partes in despiece.items()}
+_previa = st.session_state.get('pf_emp_sig')
+if _previa is not None:
+    for p, f in _firma.items():
+        if _previa.get(p) != f:
+            for k in [k for k in claves if k[0] == p]:
+                st.session_state[_k('empaque', k)] = round(emp_total[p], 2)
+st.session_state['pf_emp_sig'] = _firma
+stock, ajustes = actuales()
+
 # ── Resumen ───────────────────────────────────────────────────────
 r = F.resumen_feria(base, stock, ajustes, cfg)
 eq = (f"<span>Para cubrir otros gastos <b>{r['equilibrio_und']} und</b></span>"
@@ -239,6 +308,11 @@ for prod in list(dict.fromkeys(p for p, _ in claves)):
             st.markdown(f"<p class='pn'>{html.escape(prod)}"
                         f"{f' <span class=aj>· NUEVO · cód. {_cod}</span>' if _cod else (' <span class=aj>· NUEVO</span>' if prod in nuevos else '')}"
                         "</p>", unsafe_allow_html=True)
+            if prod in despiece:
+                _det = ' + '.join(f"{html.escape(e)}{f' ×{q:g}' if q != 1 else ''} ({money(catalogo.get(e, 0.0), 2)})"
+                                  for e, q in despiece[prod])
+                st.markdown(f"<div class='nota'>Empaque por despiece: {_det} = <b>{money(emp_total[prod], 2)}</b> "
+                            f"por unidad</div>", unsafe_allow_html=True)
             for k in [k for k in claves if k[0] == prod]:
                 v = {c: float(st.session_state[_k(c, k)]) for c in F.CAMPOS}
                 res = F.resultado(v, cfg)
@@ -273,7 +347,8 @@ if g1.button("Guardar feria", type='primary', width='stretch'):
         sh = _libro()
         ws = _ws_feria(sh, crear=True)
         ws.clear()
-        ws.update(F.grid_feria(cfg, {k: q for k, q in stock.items() if q > 0 or k in ajustes}, ajustes),
+        ws.update(F.grid_feria(cfg, {k: q for k, q in stock.items() if q > 0 or k in ajustes}, ajustes,
+                               catalogo=catalogo, despiece=despiece),
                   'A1', value_input_option='RAW')
         try:
             sh.worksheet(F.HOJA_VENTAS)

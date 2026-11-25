@@ -68,6 +68,8 @@ def parsear_feria(grid):
         cfg[k] = n
     stock, ajustes = {}, {}
     for fila in (grid[i_cab + 1:] if i_cab is not None else []):
+        if str(fila[0]).strip() in _MARCAS_EMPAQUE:     # empieza la sección de empaques
+            break
         prod, cuero = str(fila[0]).strip(), str(fila[1]).strip()
         if not (prod and cuero):
             continue
@@ -80,7 +82,9 @@ def parsear_feria(grid):
     return cfg, stock, ajustes
 
 
-def grid_feria(cfg, stock, ajustes=None):
+def grid_feria(cfg, stock, ajustes=None, catalogo=None, despiece=None):
+    """Grid de la pestaña Feria. Si vienen catalogo/despiece, se agregan al final como
+    secciones propias (ver parsear_empaques); sin ellos el formato es el de siempre."""
     ajustes = ajustes or {}
     filas = []
     for k, etiqueta in ETIQUETAS_CFG:
@@ -91,7 +95,75 @@ def grid_feria(cfg, stock, ajustes=None):
         aj = ajustes.get(k, {})
         filas.append([k[0], k[1], int(stock.get(k, 0))]
                      + ['' if aj.get(c) is None else round(float(aj[c]), 2) for c in CAMPOS])
+    if catalogo is not None:
+        filas += [[], CAB_CATALOGO]
+        filas += [[n, round(float(c), 4)] for n, c in catalogo.items() if str(n).strip()]
+    if despiece is not None:
+        filas += [[], CAB_DESPIECE]
+        for prod, partes in despiece.items():
+            filas += [[prod, e, round(float(q), 4)] for e, q in partes if str(e).strip()]
     return filas
+
+
+# ── Empaques de feria (despiece) ──────────────────────────────────
+# Catálogo: empaque → costo por unidad ($). Despiece: producto → [(empaque, cantidad por unidad)].
+# Se guardan en la pestaña Feria, después del inventario, con estas cabeceras.
+CAB_CATALOGO = ['Empaque feria', 'Costo unidad']
+CAB_DESPIECE = ['Despiece empaque', 'Empaque', 'Cantidad']
+_MARCAS_EMPAQUE = {CAB_CATALOGO[0], CAB_DESPIECE[0]}
+
+# Empaques que se compraron para la feria (notas del pedido OCT-2026-07). Costos: los pone Nicolás.
+CATALOGO_SEMILLA = {
+    'Bolsa de yute': 0.0,               # 50 und, "como las de siempre"
+    'Bolsa negra': 0.0,                 # 50 piezas
+    'Caja verde (5231)': 0.0,           # 130 cajas
+    'Bolsa de yute 10×15': 0.0,         # 90 piezas
+}
+# Qué empaque lleva cada producto, según las notas en rojo del PDF del pedido
+DESPIECE_SEMILLA = {
+    'Wine Dual': [('Bolsa de yute', 1)],
+    'Toiletry Bag': [('Bolsa de yute', 1)],
+    'Wine Deluxe': [('Bolsa negra', 1)],
+    'Toiletry Bag Deluxe': [('Bolsa negra', 1)],
+    'Golf Glove Case': [('Caja verde (5231)', 1)],
+    'Scorecard Holder': [('Caja verde (5231)', 1)],
+    'Everyday Glove Case': [('Caja verde (5231)', 1)],
+    'Luggage Tag': [('Bolsa de yute 10×15', 1)],
+    'Money Clip Wallet': [('Bolsa de yute 10×15', 1)],
+}
+
+
+def parsear_empaques(grid):
+    """→ (catalogo, despiece) de la pestaña Feria, o (None, None) si todavía no hay secciones
+    de empaque (pestañas guardadas antes de esta función)."""
+    catalogo = despiece = None
+    seccion = None
+    for f in (grid or []):
+        f = list(f) + [''] * 3
+        a = str(f[0]).strip()
+        if a == CAB_CATALOGO[0]:
+            seccion, catalogo = 'cat', {}
+            continue
+        if a == CAB_DESPIECE[0]:
+            seccion, despiece = 'desp', {}
+            continue
+        if not a:
+            continue
+        if seccion == 'cat':
+            c = _num(f[1], 0.0)
+            catalogo[a] = 0.0 if math.isnan(c) else c
+        elif seccion == 'desp':
+            e = str(f[1]).strip()
+            q = _num(f[2], 1.0)
+            if e:
+                despiece.setdefault(a, []).append((e, 1.0 if math.isnan(q) else q))
+    return catalogo, despiece
+
+
+def empaque_por_despiece(catalogo, partes):
+    """Costo de empaque por unidad = Σ cantidad × costo unitario. Empaques que no están en el
+    catálogo cuentan 0."""
+    return sum(float(q) * float(catalogo.get(e, 0.0) or 0.0) for e, q in partes)
 
 
 def parsear_ventas(grid):
