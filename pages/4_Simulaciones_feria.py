@@ -182,7 +182,9 @@ for n in range(st.session_state['sim_ncombos']):
         combos.append({'nombre': nom, 'partes': partes, 'desc': dc / 100, 'cantidad': cant})
 
 # ── Resultado ─────────────────────────────────────────────────────
-kw = dict(gastos_fijos=fijos, pct_tarjeta=tarj / 100, comision=comi / 100, otros_pct=otros_pct, combos=combos)
+todo = st.toggle("Contar todo el inventario como costo, se venda o no", value=True, key='sim_todo',
+                 help="Todo se compró o fabricó para la feria: lo que no se vende ya está pagado.")
+kw = dict(costear_todo=todo, gastos_fijos=fijos, pct_tarjeta=tarj / 100, comision=comi / 100, otros_pct=otros_pct, combos=combos)
 r = S.simular(items, vend / 100, desc / 100, **kw)
 eq = S.punto_equilibrio(items, desc / 100, **kw)
 
@@ -191,11 +193,11 @@ signo = 'pos' if r['neto'] >= 0 else 'neg'
 margen_neto = r['neto'] / r['ingresos'] if r['ingresos'] else math.nan
 st.markdown(f"""<div class='kpis'>
 <div class='kpi'><small>Ingresos</small><div>{money(r['ingresos'])}</div><span>{r['unidades']} de {unid_tot} unidades</span></div>
-<div class='kpi'><small>Costo de lo vendido</small><div>{money(r['cogs'])}</div><span>producto + empaque + envío</span></div>
+<div class='kpi'><small>{'Costo de todo el inventario' if todo else 'Costo de lo vendido'}</small><div>{money(r['cogs'])}</div><span>producto + empaque + envío (envío del lote incluido)</span></div>
 <div class='kpi'><small>Gastos</small><div>{money(r['gastos'])}</div><span>incluye {money(r['comisiones'])} de tarjeta</span></div>
 <div class='kpi {signo}'><small>Ganancia neta</small><div>{money(r['neto'])}</div><span>margen neto {'—' if math.isnan(margen_neto) else f'{margen_neto:.0%}'}</span></div>
 <div class='kpi'><small>Punto de equilibrio</small><div>{'no se cubre' if eq is None else f'{eq}%'}</div><span>del inventario vendido, con este descuento</span></div>
-<div class='kpi'><small>Queda sin vender</small><div>{money(r['sin_vender'])}</div><span>a costo; sirve para la próxima feria</span></div>
+<div class='kpi'><small>Queda sin vender</small><div>{money(r['sin_vender'])}</div><span>a costo; {'ya está pagado arriba' if todo else 'no se resta'}</span></div>
 </div>""", unsafe_allow_html=True)
 
 LAYOUT = dict(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(family='DM Sans', color=INK),
@@ -204,7 +206,7 @@ LAYOUT = dict(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=
 g1, g2 = st.columns(2)
 with g1:
     fig = go.Figure(go.Waterfall(
-        x=['Ingresos', 'Costo vendido', 'Gastos', 'Ganancia neta'], measure=['absolute', 'relative', 'relative', 'total'],
+        x=['Ingresos', 'Costo inventario' if todo else 'Costo vendido', 'Gastos', 'Ganancia neta'], measure=['absolute', 'relative', 'relative', 'total'],
         y=[r['ingresos'], -r['cogs'], -r['gastos'], 0], text=[money(r['ingresos']), money(-r['cogs']), money(-r['gastos']), money(r['neto'])],
         textposition='outside', connector=dict(line=dict(color=LINE)),
         increasing=dict(marker=dict(color=VERDE)), decreasing=dict(marker=dict(color=ROJO)),
