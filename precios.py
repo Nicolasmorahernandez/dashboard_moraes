@@ -48,6 +48,27 @@ ENTRADAS = {
     'J': 'Precio retail',
 }
 
+# Precios por volumen: nombre -> (columna del Sheet, celda del % de Ajustes).
+# Normalmente son fórmula (=ROUND(J×%)). Si el Sheet tiene un número escrito a mano en la celda,
+# ese número es un precio fijo del producto (override) y manda sobre el %.
+NIVELES = {
+    'WS 6–24': ('L', 'B10'), 'WS 25–49': ('N', 'B11'), 'WS 50–99': ('P', 'B12'),
+    'Corp 12–30': ('S', 'B13'), 'Corp 31–60': ('T', 'B14'), 'Corp 61–99': ('U', 'B15'),
+    'Corp 100–200': ('V', 'E15'),
+}
+NIVEL_POR_LETRA = {l: n for n, (l, _) in NIVELES.items()}
+
+
+def col_o(nombre):
+    """Columna del df con el precio fijo (NaN = sigue la fórmula)."""
+    return f'_o_{nombre}'
+
+
+def formula_nivel(nombre, fila):
+    letra, celda = NIVELES[nombre]
+    return f'=ROUND(J{fila}*${celda[0]}${celda[1:]})'
+
+
 LETRAS = 'ABCDEFGHIJKLMNOPQRSTUVWX'
 
 
@@ -136,6 +157,11 @@ def parsear(valores, formulas):
             c = col_idx(letra)
             reg[nombre_col] = a_numero(_get(valores, fila, c))
             reg[f'_f_{letra}'] = _get(formulas, fila, c) if es_formula(_get(formulas, fila, c)) else ''
+        for nombre, (letra, _) in NIVELES.items():
+            c = col_idx(letra)
+            crudo = _get(formulas, fila, c)
+            reg[col_o(nombre)] = math.nan if es_formula(crudo) else a_numero(_get(valores, fila, c))
+            reg[f'_g_{nombre}'] = crudo if es_formula(crudo) else ''
         filas.append(reg)
     df_prod = pd.DataFrame(filas)
     return df_params, df_prod
@@ -185,12 +211,10 @@ def calcular(df_params, df_prod):
         return (pv - costo) / pv.replace(0, math.nan)
 
     df['Margen retail %'] = margen(precio)
-    for nombre, celda in [('WS 6–24', 'B10'), ('WS 25–49', 'B11'), ('WS 50–99', 'B12')]:
+    for nombre, (_, celda) in NIVELES.items():
         df[nombre] = (precio * p[celda]).map(redondear)
-        df[f'Margen {nombre} %'] = margen(df[nombre])
-    for nombre, celda in [('Corp 12–30', 'B13'), ('Corp 31–60', 'B14'),
-                          ('Corp 61–99', 'B15'), ('Corp 100–200', 'E15')]:
-        df[nombre] = (precio * p[celda]).map(redondear)
+        if col_o(nombre) in df:
+            df[nombre] = df[col_o(nombre)].where(df[col_o(nombre)].notna(), df[nombre])
         df[f'Margen {nombre} %'] = margen(df[nombre])
     df['Retail ideal (4× costo)'] = (costo * 4).map(redondear)
     ganancia_ws = df['WS 6–24'] - costo
@@ -229,13 +253,28 @@ def cambios_pendientes(params_orig, params_nuevo, prod_orig, prod_nuevo):
         for letra, nombre_col in ENTRADAS.items():
             antes = pr.at[fila, nombre_col]
             if _distinto(antes, r[nombre_col]):
+                # El precio retail se puede escribir aunque tenga fórmula: la reemplaza por el número.
+                reemplaza = letra == 'J' and bool(pr.at[fila, '_f_J'])
                 cambios.append({
                     'celda': f'{letra}{fila}',
                     'que': f"{r['Producto']} · {r['Cuero']} · {nombre_col}",
                     'antes': antes, 'despues': r[nombre_col],
-                    'bloqueada': bool(pr.at[fila, f'_f_{letra}']),
+                    'bloqueada': bool(pr.at[fila, f'_f_{letra}']) and not reemplaza,
+                    **({'reemplaza': True, 'f_antes': pr.at[fila, '_f_J']} if reemplaza else {}),
+                })
+        for nombre, (letra, _) in NIVELES.items():
+            if col_o(nombre) not in pr.columns:
+                continue
+            antes, despues = pr.at[fila, col_o(nombre)], r[col_o(nombre)]
+            if _distinto(antes, despues):
+                cambios.append({
+                    'celda': f'{letra}{fila}',
+                    'que': f"{r['Producto']} · {r['Cuero']} · {nombre}",
+                    'antes': antes, 'despues': despues, 'bloqueada': False, 'volumen': nombre,
+                    'f_antes': pr.at[fila, f'_g_{nombre}'],
                 })
     return cambios
+
 
 
 def payload_escritura(cambios):
@@ -246,7 +285,7 @@ def payload_escritura(cambios):
             continue
         v = c['despues']
         if v is None or (isinstance(v, float) and math.isnan(v)):
-            v = ''
+            v = formula_nivel(c['volumen'], int(c['celda'][1:])) if c.get('volumen') else ''
         datos.append({'range': c['celda'], 'values': [[v]]})
     return datos
 
