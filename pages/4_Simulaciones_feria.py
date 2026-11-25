@@ -241,7 +241,7 @@ otros_pct = st.number_input("Otros gastos como % de las ventas (empaque de regal
 
 # ── Combos ────────────────────────────────────────────────────────
 st.markdown("<div class='sec'>Combos</div>", unsafe_allow_html=True)
-st.markdown("<div class='nota'>Arma paquetes con descuento. Los combos se llevan primero las unidades del inventario y "
+st.markdown("<div class='nota'>Arma paquetes con un descuento extra, encima del descuento general. Los combos se llevan primero las unidades del inventario y "
             "el resto se vende suelto con el % de arriba.</div>", unsafe_allow_html=True)
 b1, b2, _ = st.columns([1, 1, 4])
 if b1.button("＋ Agregar combo", width='stretch'):
@@ -257,7 +257,7 @@ for n in range(st.session_state['sim_ncombos']):
         sel = [inv_etq[x] for x in b.multiselect("Productos", list(inv_etq), key=f'sim_cs{n}')]
         st.session_state.setdefault(f'sim_cd{n}', 15)
         st.session_state.setdefault(f'sim_cq{n}', 10)
-        dc = c.number_input("Descuento %", 0, 60, step=1, key=f'sim_cd{n}')
+        dc = c.number_input("Descuento extra del combo %", 0, 60, step=1, key=f'sim_cd{n}')
         cant = d.number_input("Combos vendidos", 0, 500, step=1, key=f'sim_cq{n}')
         partes = []
         if sel:
@@ -266,6 +266,13 @@ for n in range(st.session_state['sim_ncombos']):
                 st.session_state.setdefault(f'sim_cu{n}_{j}', 1)
                 q = cols[j % len(cols)].number_input(f"Unid. de {etq[k]}", 1, 10, step=1, key=f'sim_cu{n}_{j}')
                 partes.append((k, q))
+        if partes:
+            _l = sum(next(i['precio'] for i in items if (i['producto'], i['cuero']) == k) * q for k, q in partes)
+            _g = _l * (1 - desc / 100)
+            _c = _g * (1 - dc / 100)
+            st.markdown(f"<div class='nota'>Lista <b>{money(_l, 2)}</b> · con descuento general <b>{money(_g, 2)}</b> · "
+                        f"combo (−{dc}% extra) <b>{money(_c, 2)}</b> · descuento total <b>{1 - (1 - desc / 100) * (1 - dc / 100):.0%}</b></div>",
+                        unsafe_allow_html=True)
         combos.append({'nombre': nom, 'partes': partes, 'desc': dc / 100, 'cantidad': cant})
 
 s1, s2, _s = st.columns([1.3, 1.3, 3.4], vertical_alignment='center')
@@ -369,7 +376,7 @@ with g3:
 with g4:
     st.markdown("<div class='sec' style='margin-top:.2rem'>Combos</div>", unsafe_allow_html=True)
     if r['combos']:
-        tabla(pd.DataFrame([{'Combo': c['nombre'], 'Vendidos': c['vendidos'], 'Precio lista': money(c['precio_lista'], 2),
+        tabla(pd.DataFrame([{'Combo': c['nombre'], 'Vendidos': c['vendidos'], 'Precio lista': money(c['precio_lista'], 2), 'Suelto con desc. general': money(c.get('precio_suelto', c['precio_lista']), 2),
                                     'Precio combo': money(c['precio'], 2),
                                     'Margen': '—' if math.isnan(c['margen']) else f"{c['margen']:.0%}",
                                     'Ganancia': money(c['ganancia'])} for c in r['combos']]))

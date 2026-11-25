@@ -38,13 +38,13 @@ def simular(items, vendido=1.0, desc=0.0, gastos_fijos=0.0, pct_tarjeta=0.0, com
         n = min(n, posible)
         lista = sum(_f(info[k]['precio']) * q for k, q in partes)
         costo = sum(_f(info[k]['costo']) * q for k, q in partes)
-        precio = lista * (1 - _f(cb.get('desc', 0)))
+        precio = lista * (1 - desc) * (1 - _f(cb.get('desc', 0)))   # el del combo va encima del general
         for k, q in partes:
             disp[k] -= q * n
         ing += precio * n
         cogs += costo * n
         det_combos.append({'nombre': cb.get('nombre', 'Combo'), 'vendidos': n, 'piezas': n * sum(q for _, q in partes), 'ingreso': precio * n,
-                           'ganancia': (precio - costo) * n, 'precio_lista': lista, 'precio': precio,
+                           'ganancia': (precio - costo) * n, 'precio_lista': lista, 'precio_suelto': lista * (1 - desc), 'precio': precio,
                            'margen': (precio - costo) / precio if precio else math.nan})
     det = []
     for k, i in info.items():
