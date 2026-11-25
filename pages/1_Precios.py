@@ -382,9 +382,33 @@ def entrada(celda, label, valor, bloqueada=False, fmt='%.2f', step=0.5, min_valu
                     help=ayuda or (f"Celda {celda}" + (" · tiene fórmula en el Sheet, se cambia allá" if bloqueada else "")))
 
 
+def _precio_por_margen(costo, m_pct):
+    """Precio que deja el margen pedido sobre el precio: costo ÷ (1 − margen), redondeado como el Sheet."""
+    if not m_pct or _nan(costo) or m_pct >= 100:      # vacío o 0 = sin margen fijado
+        return None
+    return P.redondear(costo / (1 - m_pct / 100))
+
+
+def _on_margen_nivel(celda, costo):
+    """Margen escrito para un nivel de volumen: fija ese precio (vacío = vuelve a la fórmula)."""
+    st.session_state[f'in_{celda}'] = _precio_por_margen(costo, st.session_state.get(f'mg_{celda}'))
+    _on_change(celda)
+
+
+def _on_margen_retail(celda, costo):
+    """Margen deseado para el retail: calcula el precio y vuelve a dejar la casilla vacía."""
+    precio = _precio_por_margen(costo, st.session_state.get(f'mg_{celda}'))
+    st.session_state[f'mg_{celda}'] = None
+    if precio is None:
+        return
+    st.session_state[f'in_{celda}'] = float(precio)
+    _on_change(celda)
+
+
+
 def _limpiar_widgets(solo_ficha=False):
     """Borra el estado de los widgets para que vuelvan a leer los valores actuales."""
-    prefijos = ('emp_', 'fab_') if solo_ficha else ('in_', 'emp_', 'fab_', 'mat_')
+    prefijos = ('emp_', 'fab_') if solo_ficha else ('in_', 'mg_', 'emp_', 'fab_', 'mat_')
     for k in [k for k in st.session_state if k.startswith(prefijos)
               and k not in ('emp_orig', 'emp_raw', 'emp_componentes')]:
         del st.session_state[k]
@@ -808,6 +832,11 @@ else:
                 ayuda=f"Celda J{fila}" + (" · tiene fórmula en el Sheet; si lo cambias aquí, la reemplaza por tu número"
                                           if o['_f_J'] else ""))
         entrada(f'F{fila}', 'Unidades por caja', o['Unid/caja'], bool(o['_f_F']), fmt='%.0f', step=1.0, min_value=1.0)
+        st.number_input("O el margen retail que quieres (%)", key=f'mg_J{fila}', min_value=0.0, max_value=95.0,
+                        step=1.0, format='%.1f', value=None, on_change=_on_margen_retail,
+                        args=(f'J{fila}', r['Costo variable']), disabled=_nan(r['Costo variable']),
+                        placeholder=f"Ahora: {pct(r['Margen retail %'])}",
+                        help="Escribe el margen y presiona Enter: calcula el precio retail.")
         if o['_f_J']:
             st.markdown("<div class='nota'>El precio de este cuero sale de una fórmula del Sheet (precio base × "
                         "multiplicador). Si escribes un precio aquí, al guardar reemplaza la fórmula.</div>",
@@ -882,17 +911,22 @@ else:
             "</div>", unsafe_allow_html=True)
 
     def _editar_niveles(nombres):
-        """Casillas para fijar a mano el precio de cada nivel (vacío = sigue el % de Ajustes)."""
-        st.markdown("<div class='nota'>Fija un precio para este producto y cuero, o déjalo vacío para que siga "
-                    "el % de Ajustes.</div>", unsafe_allow_html=True)
+        """Margen deseado por nivel; el precio sale de ahí (vacío = sigue el % de Ajustes)."""
+        st.markdown("<div class='nota'>Escribe el margen que quieres en este producto y cuero; el precio sale "
+                    "solo (costo ÷ (1 − margen)). Vacío = sigue el % de Ajustes.</div>", unsafe_allow_html=True)
         cols_ = st.columns(len(nombres))
         for col_, n_ in zip(cols_, nombres):
             l_, c_ = P.NIVELES[n_]
+            celda_ = f'{l_}{fila}'
+            ov_ = o[P.col_o(n_)]
+            st.session_state.setdefault(
+                f'mg_{celda_}', None if (_nan(ov_) or _nan(costo) or not ov_) else round((ov_ - costo) / ov_ * 100, 1))
             with col_:
-                entrada(f'{l_}{fila}', n_.replace('WS', 'Wholesale').replace('Corp', 'Corporativo') + ' (USD)',
-                        o[P.col_o(n_)], False, fmt='%.0f', step=1.0,
-                        placeholder=f"{money(r[n_])} ({p[c_]:.0%})",
-                        ayuda=f"Celda {l_}{fila} · vacío = fórmula ({p[c_]:.0%} del retail)")
+                st.number_input(n_.replace('WS', 'Wholesale').replace('Corp', 'Corporativo') + ' · margen %',
+                                key=f'mg_{celda_}', min_value=0.0, max_value=95.0, step=1.0, format='%.1f',
+                                disabled=_nan(costo), on_change=_on_margen_nivel, args=(celda_, costo),
+                                placeholder=f"Auto: {pct(r[f'Margen {n_} %'])}",
+                                help=f"Celda {celda_} · ahora {money(r[n_])} ({p[c_]:.0%} del retail). Al escribir un margen se guarda el precio que resulta.")
 
     # Precios por volumen
     st.markdown("")
