@@ -12,7 +12,7 @@ from gspread.utils import ValueRenderOption
 
 import feria as F
 import precios as P
-import simulacion as S
+import simulacion_feria as S
 from auth import autenticar
 from constants import SHEET_PRECIOS_ID as _PRECIOS_DEFAULT
 from estilo_feria import CSS, CARD, LINE, INK, MUTED, FAINT, ACENTO, MIEL, VERDE, ROJO
