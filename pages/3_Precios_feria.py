@@ -36,6 +36,9 @@ st.markdown(f"""<style>
 .aj {{ color:{ACENTO}; font-size:.72rem; font-weight:600; letter-spacing:.05em; }}
 .mini img {{ height:110px !important; }}
 .mini.vacia {{ height:110px !important; font-size:2rem !important; }}
+/* Popovers (Editar, ✎ Nombre, ＋ Color): sin la franja oscura del tema global */
+[data-testid="stPopoverBody"] > div {{ background:transparent !important; }}
+[data-testid="stPopoverBody"] label, [data-testid="stPopoverBody"] label p {{ color:{MUTED} !important; }}
 </style>""", unsafe_allow_html=True)
 
 if CLAVE and not (st.session_state.get('precios_ok') or st.session_state.get('admin')):
@@ -218,6 +221,66 @@ def _desp_de(prod):
     return [(e, float(st.session_state.get(f'pf_dq_{prod}_{e}', 1.0))) for e in sel]
 
 
+def _mover(viejo, nuevo):
+    """Pasa el valor de una clave de session_state a otra (si existe)."""
+    if viejo in st.session_state:
+        st.session_state[nuevo] = st.session_state.pop(viejo)
+
+
+def _renombrar_empaque(viejo):
+    """Callback de 'Editar' en un empaque: cambia el nombre en el catálogo y en los productos que lo usan,
+    conservando costo y cantidades."""
+    nuevo = str(st.session_state.get(f'pf_en_{viejo}', '')).strip()
+    cat = st.session_state['pf_cat']
+    if not nuevo or nuevo == viejo:
+        return
+    if nuevo in cat:
+        st.toast(f"Ya existe un empaque llamado «{nuevo}».")
+        return
+    costo = float(st.session_state.get(f'pf_cc_{viejo}', cat.get(viejo, 0.0)))
+    st.session_state['pf_cat'] = {(nuevo if e == viejo else e): (costo if e == viejo else c) for e, c in cat.items()}
+    st.session_state.pop(f'pf_cc_{viejo}', None)
+    st.session_state[f'pf_cc_{nuevo}'] = costo
+    for k in [k for k in list(st.session_state) if k.startswith('pf_dm_')]:
+        sel = st.session_state[k]
+        if isinstance(sel, list) and viejo in sel:
+            prod = k[len('pf_dm_'):]
+            st.session_state[k] = [nuevo if e == viejo else e for e in sel]
+            _mover(f'pf_dq_{prod}_{viejo}', f'pf_dq_{prod}_{nuevo}')
+    st.session_state['pf']['emp_desp'] = {p: [(nuevo if e == viejo else e, q) for e, q in partes]
+                                          for p, partes in st.session_state['pf']['emp_desp'].items()}
+    st.toast(f"Empaque renombrado: {viejo} → {nuevo}. Recuerda «Guardar feria».")
+
+
+def _renombrar_producto(viejo):
+    """Callback de '✎ Nombre' (solo productos nuevos): cambia el nombre en todos sus colores,
+    conservando unidades, precio, costos y empaques."""
+    nuevo = str(st.session_state.get(f'pf_pn_{viejo}', '')).strip()
+    lista = st.session_state['pf_items']
+    if not nuevo or nuevo == viejo:
+        return
+    if any(p == nuevo for p, _ in lista):
+        st.toast(f"Ya hay un producto llamado «{nuevo}».")
+        return
+    for i, k in enumerate(list(lista)):
+        if k[0] != viejo:
+            continue
+        nk = (nuevo, k[1])
+        for c in ['stock'] + list(F.CAMPOS):
+            _mover(_k(c, k), _k(c, nk))
+        lista[i] = nk
+    for k in [k for k in list(st.session_state) if k.startswith(f'pf_dq_{viejo}_')]:
+        _mover(k, f'pf_dq_{nuevo}_' + k[len(f'pf_dq_{viejo}_'):])
+    _mover(f'pf_dm_{viejo}', f'pf_dm_{nuevo}')
+    desp = st.session_state['pf']['emp_desp']
+    if viejo in desp:
+        desp[nuevo] = desp.pop(viejo)
+    sig = st.session_state.get('pf_emp_sig')
+    if isinstance(sig, dict) and viejo in sig:
+        sig[nuevo] = sig.pop(viejo)
+    st.toast(f"Producto renombrado: {viejo} → {nuevo}. Recuerda «Guardar feria».")
+
+
 despiece = {p: _desp_de(p) for p in dict.fromkeys(prods_feria + list(pf['emp_desp']))}
 despiece = {p: v for p, v in despiece.items() if v}
 emp_total = {p: F.empaque_por_despiece(catalogo, partes) for p, partes in despiece.items()}
@@ -227,9 +290,13 @@ with st.expander("Empaques de la feria (costos)", expanded=bool(pf.get('emp_semi
                 "Qué lleva cada producto lo eliges en su tarjeta, abajo. Cuando cambias un costo, el "
                 "<b>Empaque</b> de los productos que lo usan se recalcula solo.</div>", unsafe_allow_html=True)
     for e in list(cat_w):
-        c1, c2, c3 = st.columns([3, 1.4, .7], vertical_alignment='bottom')
+        c1, c2, c4, c3 = st.columns([3, 1.4, .7, .7], vertical_alignment='bottom')
         c1.markdown(f"<div class='fila-c'>{html.escape(e)}</div>", unsafe_allow_html=True)
         c2.number_input("Costo por unidad ($)", 0.0, step=0.05, format='%.2f', key=f'pf_cc_{e}')
+        with c4.popover("Editar", width='stretch'):
+            st.text_input("Nuevo nombre", value=e, key=f'pf_en_{e}')
+            st.button("Guardar nombre", key=f'pf_enb_{e}', width='stretch',
+                      on_click=_renombrar_empaque, args=(e,))
         if c3.button("Quitar", key=f'pf_cq_{e}', width='stretch'):
             del cat_w[e]
             st.session_state.pop(f'pf_cc_{e}', None)
@@ -307,6 +374,11 @@ for prod in list(dict.fromkeys(p for p, _ in claves)):
             st.markdown(f"<p class='pn'>{html.escape(prod)}"
                         f"{f' <span class=aj>· NUEVO · cód. {_cod}</span>' if _cod else (' <span class=aj>· NUEVO</span>' if prod in nuevos else '')}"
                         "</p>", unsafe_allow_html=True)
+            if prod in nuevos:      # solo los nuevos: los de la hoja de precios se llaman como en la hoja
+                with st.popover("✎ Nombre"):
+                    st.text_input("Nuevo nombre del producto", value=prod, key=f'pf_pn_{prod}')
+                    st.button("Guardar nombre", key=f'pf_pnb_{prod}', width='stretch',
+                              on_click=_renombrar_producto, args=(prod,))
             d1, d2 = st.columns([3, 1], vertical_alignment='bottom')
             _sel0 = [e for e, _ in despiece.get(prod, []) if e in cat_w]
             st.session_state.setdefault(f'pf_dm_{prod}', _sel0)
