@@ -15,7 +15,7 @@ def _f(x, d=0.0):
 
 
 def simular(items, vendido=1.0, desc=0.0, gastos_fijos=0.0, pct_tarjeta=0.0, comision=0.0,
-            otros_pct=0.0, combos=(), vendido_por=None):
+            otros_pct=0.0, combos=(), vendido_por=None, costear_todo=True):
     """→ dict con ingresos, costo vendido, gastos, neto y detalle por producto y por combo.
 
     vendido / desc son fracciones (0.6 = 60 %). Los combos [{nombre, partes:[(clave, cant)], desc, cantidad}]
@@ -63,7 +63,11 @@ def simular(items, vendido=1.0, desc=0.0, gastos_fijos=0.0, pct_tarjeta=0.0, com
     gastos = gastos_fijos + comis + otros
     inventario_sin_vender = sum(_f(info[k]['costo']) * (disp[k] - int(round(disp[k] * min(max(_f(vendido_por.get(k, vendido)), 0), 1))))
                                 for k in info)
-    return {'ingresos': ing, 'cogs': cogs, 'bruta': ing - cogs, 'gastos': gastos, 'comisiones': comis,
+    cogs_vendido = cogs
+    if costear_todo:        # todo se produjo/compró para la feria: se paga lo vendido o no
+        cogs = sum(_f(i['costo']) * int(_f(i['stock'])) for i in items)
+    return {'cogs_vendido': cogs_vendido, 'costo_stock': sum(_f(i['costo']) * int(_f(i['stock'])) for i in items),
+            'ingresos': ing, 'cogs': cogs, 'bruta': ing - cogs, 'gastos': gastos, 'comisiones': comis,
             'neto': ing - cogs - gastos, 'productos': det, 'combos': det_combos,
             'sin_vender': inventario_sin_vender,
             'unidades': sum(d['vendidas'] for d in det) + sum(c.get('piezas', 0) for c in det_combos)}
