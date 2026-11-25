@@ -130,4 +130,5 @@ FOTOS = {
     'Wine Deluxe': 'wine-deluxe.webp',
     'Wine Dual': 'wine-dual.webp',
     'Wine Single': 'wine-single.webp',
+    'Wine Magnum': 'wine-magnum.webp',   # bajada de moraesleather.com en la Mac
 }
