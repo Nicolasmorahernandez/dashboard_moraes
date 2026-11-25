@@ -53,8 +53,8 @@ st.markdown(f"""
 [data-testid="stVerticalBlock"] {{ border-color:{LINE} !important; }}
 [data-testid="stLayoutWrapper"] > [data-testid="stVerticalBlock"] {{ background:{CARD}; border-radius:18px;
     box-shadow:0 2px 10px rgba(120,80,40,.06); }}
-.ph {{ background:#f3ece2; border-radius:12px; overflow:hidden; display:flex; justify-content:center; margin-bottom:.6rem; }}
-.ph img {{ width:100%; height:230px; object-fit:cover; }}
+.ph {{ background:#f6f1eb; border-radius:12px; overflow:hidden; display:flex; justify-content:center; margin-bottom:.6rem; }}
+.ph img {{ width:100%; height:230px; object-fit:contain; }}
 .ph.grande img {{ height:360px; }}
 .ph.vacia {{ height:230px; align-items:center; font-family:'Fraunces',serif; font-size:3rem; color:{FAINT}; }}
 .pn {{ font-family:'Fraunces',serif; font-size:1.35rem; line-height:1.15; color:{INK}; margin:0; }}

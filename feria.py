@@ -117,10 +117,11 @@ def fila_venta(fecha, hora, feria, producto, cuero, cantidad, precio, desc_pct, 
 
 
 # Foto principal de cada producto (carpeta fotos/, sacadas de Drive "*-01-hero").
-# Supuesto: Everyday Glove Case = golf-glove-01-hero y Valuables Pouch = cognac-golf-pouch-01-hero.
+# Según moraesleather.com: Everyday Glove Case = golf-glove-case (cognac), Golf Glove Case = golf-glove (oscura).
+# Supuesto: Valuables Pouch = cognac-golf-pouch-01-hero.
 FOTOS = {
-    'Golf Glove Case': 'golf-glove-case.webp',
-    'Everyday Glove Case': 'everyday-glove-case.webp',
+    'Golf Glove Case': 'everyday-glove-case.webp',
+    'Everyday Glove Case': 'golf-glove-case.webp',
     'Drawstring Pouch': 'drawstring-pouch.webp',
     'Valuables Pouch': 'valuables-pouch.webp',
     'Notebook / Planner Cover': 'planner-cover.webp',
