@@ -358,13 +358,14 @@ with st.expander("Preparar feria (Nicolás)"):
     for prod in productos:
         cueros_p = [c for p, c in precios if p == prod]
         total = sum(stock.get((prod, c), 0) for c in cueros_p)
-        with st.expander(f"{prod}{f' · {total} und' if total else ''}"):
-            cols = st.columns(len(cueros_p))
-            for col, c in zip(cols, cueros_p):
-                q = col.number_input(c, min_value=0, value=int(stock.get((prod, c), 0)), step=1,
-                                     key=f'adm_q_{prod}_{c}')
-                if q:
-                    nuevo_stock[(prod, c)] = int(q)
+        st.markdown(f"<p class='pm' style='margin-top:.8rem'><b>{html.escape(prod)}</b>"
+                    f"{f' · {total} und' if total else ''}</p>", unsafe_allow_html=True)
+        cols = st.columns(4)
+        for col, c in zip(cols, cueros_p):
+            q = col.number_input(c, min_value=0, value=int(stock.get((prod, c), 0)), step=1,
+                                 key=f'adm_q_{prod}_{c}')
+            if q:
+                nuevo_stock[(prod, c)] = int(q)
     if nombre_f.strip() != cfg['feria'] and any(str(r.get('Feria', '')).strip() == cfg['feria'] for r in ventas):
         st.markdown("<div class='aviso'>Al cambiar el nombre empiezas una feria nueva: el conteo de vendidos "
                     "arranca de cero con el inventario de arriba.</div>", unsafe_allow_html=True)
