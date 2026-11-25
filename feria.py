@@ -131,4 +131,12 @@ FOTOS = {
     'Wine Dual': 'wine-dual.webp',
     'Wine Single': 'wine-single.webp',
     'Wine Magnum': 'wine-magnum.webp',   # bajada de moraesleather.com en la Mac
+    'Luggage Tag': 'luggage-tag.webp',
+    'Duffle': 'duffle.webp',
+    'Cylindrical Wine Duo Carrier': 'cylindrical-wine-duo.webp',
+    'Money Clip Wallet': 'money-clip-wallet.webp',
+    'Shoe Bag': 'shoe-bag.webp',
+    'Toiletry Bag': 'toiletry-bag.webp',
+    'Toiletry Bag Deluxe': 'toiletry-bag-deluxe.webp',
+    'Laptop Sleeve': 'laptop-sleeve.webp',
 }
