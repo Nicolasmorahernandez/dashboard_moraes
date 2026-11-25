@@ -265,11 +265,12 @@ def fab_actual(prod):
 
 
 precios_mat = {n: x for n, _, x in mat_actual()}
+TASA_BASE = float(params_nuevo.loc[params_nuevo['Celda'] == 'B4', 'Valor'].iloc[0])
 desglose_fab = {}   # fila -> desglose del costo fabricado
 for _i, _r in prod_nuevo.iterrows():
     _bom = fab_actual(_r['Producto'])
     if _bom is not None:
-        _d = P.costo_fabricado(_bom, _r['Cuero'], precios_mat)
+        _d = P.costo_fabricado(_bom, _r['Cuero'], precios_mat, TASA_BASE)
         desglose_fab[int(_r['Fila'])] = _d
         prod_nuevo.at[_i, 'Costo proveedor'] = _d['total']
         prod_nuevo.at[_i, '_f_C'] = ''
@@ -293,7 +294,7 @@ def _cueros_nv(nv):
     """Cueros del producto nuevo; si es fabricado, el costo se recalcula con los precios de materiales."""
     if not nv.get('bom'):
         return nv['cueros']
-    return [(c, P.costo_fabricado(nv['bom'], c, precios_mat)['total'], pr) for c, _, pr in nv['cueros']]
+    return [(c, P.costo_fabricado(nv['bom'], c, precios_mat, TASA_BASE)['total'], pr) for c, _, pr in nv['cueros']]
 
 
 df_nuevos = pd.concat(
@@ -341,6 +342,10 @@ for _prod, _est in pend_emp.items():
 
 def _nan(x):
     return x is None or (isinstance(x, float) and math.isnan(x))
+
+
+def cop(x):
+    return '—' if _nan(x) else f"${x:,.0f} COP"
 
 
 def money(x, dec=0):
@@ -513,8 +518,8 @@ def bloque_origen(prod, filas_prod, o, fila):
 def bloque_fabricacion(prod, bom):
     st.markdown("<div class='emp-t'>Hoja de costos (aplica a todos los cueros)</div>", unsafe_allow_html=True)
     a, b = st.columns(2)
-    pies2 = a.number_input("Cuero (pie²)", value=float(bom['pies2']), min_value=0.0, step=0.1, format='%.2f',
-                           key=f'fab_pies_{prod}', help="Pies² que gasta una unidad, sin contar desperdicio")
+    dm2 = a.number_input("Cuero (dm²)", value=float(bom['dm2']), min_value=0.0, step=1.0, format='%.1f',
+                         key=f'fab_dm2_{prod}', help="Decímetros² que gasta una unidad, sin contar desperdicio")
     desp = b.number_input("Desperdicio %", value=float(bom['desperdicio']) * 100, min_value=0.0, max_value=200.0,
                           step=1.0, format='%.0f', key=f'fab_desp_{prod}',
                           help="Recortes que se pierden al cortar. 20% es un supuesto inicial")
@@ -539,7 +544,7 @@ def bloque_fabricacion(prod, bom):
     st.markdown("<div class='nota'>Cantidad por unidad, en la unidad de cada material (m de hilo, und de "
                 "herraje…). Los precios y nuevos materiales se ponen en <b>Materiales</b>, arriba.</div>",
                 unsafe_allow_html=True)
-    nuevo = {'pies2': float(pies2 or 0), 'desperdicio': float(desp or 0) / 100, 'minutos': float(minutos or 0),
+    nuevo = {'dm2': float(dm2 or 0), 'desperdicio': float(desp or 0) / 100, 'minutos': float(minutos or 0),
              'taller': float(taller or 0) / 100, 'items': items}
     _set_pend_fab(prod, nuevo)
 
@@ -597,8 +602,8 @@ def hoja_costos_nuevo(idx, bom, cueros):
     st.markdown("<div class='emp-t'>Hoja de costos por unidad (aplica a todos los cueros)</div>",
                 unsafe_allow_html=True)
     a, b, c_, d = st.columns(4)
-    pies2 = a.number_input("Cuero (pie²)", value=float(bom['pies2']), min_value=0.0, step=0.1, format='%.2f',
-                           key=f'{k}_pies', help="Pies² que gasta una unidad, sin contar desperdicio")
+    dm2 = a.number_input("Cuero (dm²)", value=float(bom['dm2']), min_value=0.0, step=1.0, format='%.1f',
+                         key=f'{k}_dm2', help="Decímetros² que gasta una unidad, sin contar desperdicio")
     desp = b.number_input("Desperdicio %", value=float(bom['desperdicio']) * 100, min_value=0.0, max_value=200.0,
                           step=1.0, format='%.0f', key=f'{k}_desp', help="20% es un supuesto inicial")
     minutos = c_.number_input("Mano de obra (min)", value=float(bom['minutos']), min_value=0.0, step=5.0,
@@ -614,29 +619,33 @@ def hoja_costos_nuevo(idx, bom, cueros):
                          accept_new_options=True, key=f'{k}_mats',
                          placeholder="Elige o escribe uno nuevo")
     cant_prev = dict(bom['items'])
-    st.markdown("<div class='emp-t'>Precios (se guardan en la pestaña Materiales y sirven para otros productos)</div>",
-                unsafe_allow_html=True)
+    st.markdown("<div class='emp-t'>Precios en pesos (COP). Se guardan en la pestaña Materiales y sirven para "
+                "otros productos</div>", unsafe_allow_html=True)
     items, nuevos_precios = [], {}
-    fijos = [(P.nombre_cuero(c), 'pie²', f"Cuero {c} (USD/pie²)") for c in cueros] + \
-        [(P.VALOR_HORA, 'hora', "Mano de obra (USD/hora)")]
-    for col_, (nombre_m, unidad, etiqueta) in zip(st.columns(4 if len(fijos) > 2 else len(fijos)) * 2, fijos):
-        precio = col_.number_input(etiqueta, value=float(catalogo.get(nombre_m, (unidad, 0.0))[1]),
-                                   min_value=0.0, step=0.5, format='%.2f', key=f'{k}_p_{nombre_m}')
-        nuevos_precios[nombre_m] = (unidad, float(precio or 0))
-    for n0 in range(0, len(sel), 2):
-        cols_ = st.columns(4)
-        for t, m in enumerate(sel[n0:n0 + 2]):
-            unidad = catalogo.get(m, ('und', 0.0))[0] or 'und'
-            q = cols_[2 * t].number_input(f"{m}: cantidad ({unidad})", value=float(cant_prev.get(m, 0.0)),
-                                          min_value=0.0, step=0.5, format='%.2f', key=f'{k}_q_{m}')
-            precio = cols_[2 * t + 1].number_input(f"{m}: USD por {unidad}",
-                                                   value=float(catalogo.get(m, (unidad, 0.0))[1]),
-                                                   min_value=0.0, step=0.5, format='%.2f', key=f'{k}_p_{m}')
-            items.append((m, float(q or 0)))
-            nuevos_precios[m] = (unidad, float(precio or 0))
+    fijos = [(P.nombre_cuero(c), 'dm²', f"Cuero {c} (COP por dm²)") for c in cueros] + \
+        [(P.VALOR_HORA, 'hora', "Mano de obra (COP por hora)")]
+    for n0 in range(0, len(fijos), 4):
+        for col_, (nombre_m, unidad, etiqueta) in zip(st.columns(4), fijos[n0:n0 + 4]):
+            precio = col_.number_input(etiqueta, value=float(catalogo.get(nombre_m, (unidad, 0.0))[1]),
+                                       min_value=0.0, step=500.0, format='%.0f', key=f'{k}_p_{nombre_m}')
+            nuevos_precios[nombre_m] = (unidad, float(precio or 0))
+    for m in sel:
+        c1, c2, c3 = st.columns(3, vertical_alignment='bottom')
+        nuevo_m = m not in catalogo
+        unidad = c3.selectbox(f"{m} · unidad" + (" (nuevo)" if nuevo_m else ""), P.UNIDADES,
+                              index=P.UNIDADES.index(catalogo[m][0])
+                              if not nuevo_m and catalogo[m][0] in P.UNIDADES else 0,
+                              key=f'{k}_u_{m}', disabled=not nuevo_m,
+                              help="Al agregar un material nuevo, dice si se cuenta por unidad, por metro o por dm²")
+        q = c1.number_input(f"{m} · cantidad ({unidad})", value=float(cant_prev.get(m, 0.0)),
+                            min_value=0.0, step=0.5, format='%.2f', key=f'{k}_q_{m}')
+        precio = c2.number_input(f"{m} · COP por {unidad}", value=float(catalogo.get(m, (unidad, 0.0))[1]),
+                                 min_value=0.0, step=100.0, format='%.0f', key=f'{k}_p_{m}')
+        items.append((m, float(q or 0)))
+        nuevos_precios[m] = (unidad, float(precio or 0))
     lista = [(n, nuevos_precios.get(n, (u, x))[0], nuevos_precios.get(n, (u, x))[1]) for n, (u, x) in catalogo.items()]
     lista += [(n, u, x) for n, (u, x) in nuevos_precios.items() if n not in catalogo]
-    bom = {'pies2': float(pies2 or 0), 'desperdicio': float(desp or 0) / 100, 'minutos': float(minutos or 0),
+    bom = {'dm2': float(dm2 or 0), 'desperdicio': float(desp or 0) / 100, 'minutos': float(minutos or 0),
            'taller': float(taller or 0) / 100, 'items': items}
     return bom, lista
 
@@ -671,7 +680,7 @@ def dialogo_nuevo(idx=None):
     elif cueros:
         bom, mats_nuevos = hoja_costos_nuevo(idx, bom_prev or {**P.FAB_DEFAULT, 'items': []}, cueros)
         precios_ = {n: x for n, _, x in mats_nuevos}
-        costos = [(c, P.costo_fabricado(bom, c, precios_)['total']) for c in cueros]
+        costos = [(c, P.costo_fabricado(bom, c, precios_, TASA_BASE)['total']) for c in cueros]
         st.markdown("<div class='nota'>Costo de fabricación por unidad: " + ' · '.join(
             f"{html.escape(c)} <b>{money(q, 2)}</b>" for c, q in costos) + "</div>", unsafe_allow_html=True)
     margen = st.slider("Margen retail que quieres", min_value=10, max_value=90, step=1,
@@ -733,14 +742,16 @@ with h2:
     b0, b1, b2 = st.columns(3)
     with b0.popover("Materiales", width='stretch'):
         st.markdown("**Precios de materiales**")
-        st.caption("Para productos fabricados por ti. Cuero por pie², mano de obra por hora, el resto por "
-                   "su unidad. En USD a la tasa base, igual que el costo proveedor: el ajuste cambiario "
-                   "se suma encima. Agrega materiales con el + de la tabla.")
+        st.caption("Para productos fabricados por ti. Cuero por dm², mano de obra por hora, el resto por "
+                   "su unidad (m, und…). Todo en pesos (COP): la app lo pasa a dólares con la tasa BASE, igual "
+                   "que el costo proveedor, y el ajuste cambiario se suma encima. Agrega materiales con el + "
+                   "de la tabla.")
         st.session_state.setdefault('mat_base', pd.DataFrame(mat_actual(), columns=P.CAB_MATERIALES))
         st.data_editor(st.session_state['mat_base'], key='mat_ed', num_rows='dynamic', hide_index=True,
                        width='stretch', on_change=_on_materiales,
                        column_config={'Material': st.column_config.TextColumn(required=True),
-                                      'Precio (USD)': st.column_config.NumberColumn(min_value=0.0, format='$%.2f')})
+                                      'Precio (COP)': st.column_config.NumberColumn(min_value=0.0, format='$%d'),
+                                      'Unidad': st.column_config.SelectboxColumn(options=P.UNIDADES)})
         if st.session_state['M_raw'] is None:
             st.caption("La pestaña Materiales se crea en el Sheet la primera vez que guardes.")
     with b1.popover("Ajustes", width='stretch'):
@@ -845,7 +856,7 @@ else:
         if fila in desglose_fab:
             _d = desglose_fab[fila]
             if _d['precio_cuero'] == 0:
-                st.markdown(f"<div class='aviso'>Falta el precio del cuero {html.escape(cuero)} por pie² en "
+                st.markdown(f"<div class='aviso'>Falta el precio del cuero {html.escape(cuero)} por dm² en "
                             "<b>Materiales</b>.</div>", unsafe_allow_html=True)
             if _d['valor_hora'] == 0 and fab_actual(producto_sel)['minutos'] > 0:
                 st.markdown("<div class='aviso'>Falta el valor hora de mano de obra en <b>Materiales</b>.</div>",
@@ -895,10 +906,10 @@ else:
                        f"{f'<small>{nota}</small>' if nota else ''}</span><span>{money(v, 2)}</span></div>")
             if n == 'Fabricación':
                 _bom = fab_actual(producto_sel)
-                _sub = [(f"Cuero · {_bom['pies2']:g} pie² × {money(_dfab['precio_cuero'], 2)} + {_bom['desperdicio']:.0%}",
+                _sub = [(f"Cuero · {_bom['dm2']:g} dm² × {cop(_dfab['precio_cuero'])} + {_bom['desperdicio']:.0%}",
                          _dfab['cuero'])]
-                _sub += [(f"{c} · {q:g} × {money(x, 2)}", s_) for c, q, x, s_ in _dfab['detalle_mat']]
-                _sub += [(f"Mano de obra · {_bom['minutos']:g} min × {money(_dfab['valor_hora'], 2)}/h", _dfab['mano']),
+                _sub += [(f"{c} · {q:g} × {cop(x)}", s_) for c, q, x, s_ in _dfab['detalle_mat']]
+                _sub += [(f"Mano de obra · {_bom['minutos']:g} min × {cop(_dfab['valor_hora'])}/h", _dfab['mano']),
                          (f"Taller · {_bom['taller']:.0%}", _dfab['taller'])]
                 lineas += ''.join(f"<div class='ln sub'><span>{html.escape(t)}</span><span>{money(x, 2)}</span></div>"
                                   for t, x in _sub)

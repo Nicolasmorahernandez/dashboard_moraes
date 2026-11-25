@@ -382,22 +382,26 @@ def valor_celda_empaque(producto, estado):
 # ── Productos fabricados en el taller ─────────────────────────────
 # Un producto es "fabricado" si tiene filas en la pestaña Fabricación.
 # Su costo (columna C, por cuero) lo calcula la app y lo escribe como número:
-#   (pie² × precio del cuero × (1 + desperdicio) + Σ cantidad × precio material
+#   (dm² × precio del cuero × (1 + desperdicio) + Σ cantidad × precio material
 #    + minutos/60 × valor hora) × (1 + % taller)
-# Los precios viven en la pestaña Materiales.
+# Los precios viven en la pestaña Materiales, en COP (cuero por dm², mano de obra por hora). El costo en USD
+# se saca con la tasa BASE (B4), igual que el costo proveedor: el Sheet suma el ajuste cambiario encima.
+DM2_POR_PIE2 = 9.2903
 
 HOJA_MATERIALES = 'Materiales'
-CAB_MATERIALES = ['Material', 'Unidad', 'Precio (USD)']
+CAB_MATERIALES = ['Material', 'Unidad', 'Precio (COP)']
+UNIDADES = ['und', 'm', 'dm²', 'hora']
 VALOR_HORA = 'Valor hora (mano de obra)'
 CUEROS = ['Vaqueta', 'Napa', 'Crazy Horse', 'Hampton']
-MATERIALES_BASE = ([(f'Cuero {c}', 'pie²', 0.0) for c in CUEROS]
+MATERIALES_BASE = ([(f'Cuero {c}', 'dm²', 0.0) for c in CUEROS]
                    + [(VALOR_HORA, 'hora', 0.0), ('Hilo', 'm', 0.0), ('Herraje', 'und', 0.0),
-                      ('Forro', 'pie²', 0.0), ('Pegante', 'und', 0.0), ('Tinta de cantos', 'und', 0.0)])
+                      ('Ojales', 'und', 0.0), ('Cordón elástico', 'm', 0.0),
+                      ('Forro', 'dm²', 0.0), ('Pegante', 'und', 0.0), ('Tinta de cantos', 'und', 0.0)])
 
 HOJA_FAB = 'Fabricación'
 CAB_FAB = ['Producto', 'Campo', 'Concepto', 'Cantidad']
-FAB_CAMPOS = ('pies2', 'desperdicio', 'minutos', 'taller')
-FAB_DEFAULT = {'pies2': 0.0, 'desperdicio': 0.20, 'minutos': 0.0, 'taller': 0.05, 'items': []}  # % supuestos
+FAB_CAMPOS = ('dm2', 'desperdicio', 'minutos', 'taller')
+FAB_DEFAULT = {'dm2': 0.0, 'desperdicio': 0.20, 'minutos': 0.0, 'taller': 0.05, 'items': []}  # % supuestos
 
 
 def nombre_cuero(cuero):
@@ -432,6 +436,8 @@ def parsear_fab(grid):
         bom = out.setdefault(prod, {**FAB_DEFAULT, 'items': []})
         if campo in FAB_CAMPOS:
             bom[campo] = cant
+        elif campo == 'pies2':          # versión anterior: pie² → dm²
+            bom['dm2'] = cant * DM2_POR_PIE2
         elif campo == 'material' and concepto:
             bom['items'].append((concepto, cant))
     return out
@@ -447,13 +453,15 @@ def grid_fab(fab):
     return filas
 
 
-def costo_fabricado(bom, cuero, precios):
-    """precios: {material: precio}. Devuelve dict con el desglose y 'total'."""
+def costo_fabricado(bom, cuero, precios, tasa_base):
+    """precios: {material: precio en COP}. Devuelve el desglose en USD a la tasa base ('total' incluido);
+    'precio_cuero' y 'valor_hora' quedan en COP y cada material trae su precio COP."""
+    k = 1 / tasa_base if tasa_base else math.nan
     p_cuero = precios.get(nombre_cuero(cuero), 0.0)
-    cuero_usd = bom['pies2'] * p_cuero * (1 + bom['desperdicio'])
-    mats = [(c, q, precios.get(c, 0.0), q * precios.get(c, 0.0)) for c, q in bom['items']]
+    cuero_usd = bom['dm2'] * p_cuero * (1 + bom['desperdicio']) * k
+    mats = [(c, q, precios.get(c, 0.0), q * precios.get(c, 0.0) * k) for c, q in bom['items']]
     materiales = sum(m[3] for m in mats)
-    mano = bom['minutos'] / 60 * precios.get(VALOR_HORA, 0.0)
+    mano = bom['minutos'] / 60 * precios.get(VALOR_HORA, 0.0) * k
     base = cuero_usd + materiales + mano
     taller = base * bom['taller']
     return {'cuero': cuero_usd, 'precio_cuero': p_cuero, 'materiales': materiales, 'detalle_mat': mats,
