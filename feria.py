@@ -335,7 +335,7 @@ SEMILLA = {
     ('Wine Deluxe', 'Vaqueta hoja seca'): 5, ('Wine Deluxe', 'Vaqueta café'): 5, ('Wine Deluxe', 'Vaqueta negra'): 5,
     ('Wine Dual', 'Vaqueta hoja seca'): 10, ('Wine Dual', 'Vaqueta café'): 5, ('Wine Dual', 'Vaqueta negra'): 5,
     ('Wine Single', 'Vaqueta hoja seca'): 5, ('Wine Single', 'Vaqueta café'): 5,
-    ('Producto nuevo 111', 'Crazy Horse'): 19, ('Producto nuevo 111', 'Vaqueta hoja seca'): 19,
+    ('Leather Golf Pouch', 'Crazy Horse'): 19, ('Leather Golf Pouch', 'Vaqueta hoja seca'): 19,
     ('Toiletry Bag', 'Vaqueta hoja seca'): 5, ('Toiletry Bag', 'Crazy Horse'): 4,
     ('Golf Glove Case', 'Crazy Horse'): 45,
     ('Scorecard Holder', 'Crazy Horse'): 10, ('Scorecard Holder', 'Vaqueta hoja seca'): 10,
@@ -352,4 +352,4 @@ SEMILLA = {
     ('Luxury Keychain', 'Azul oscuro'): 7,
 }
 # Código del proveedor de los productos nuevos
-CODIGOS_NUEVOS = {'Producto nuevo 111':'111', 'Leather Notebook Cover Midori': '1032', 'Luxury Keychain': '9898'}
+CODIGOS_NUEVOS = {'Leather Golf Pouch':'111', 'Leather Notebook Cover Midori': '1032', 'Luxury Keychain': '9898'}
