@@ -487,7 +487,7 @@ def ultima_fila_ocupada(valores):
 
 def formula_precio_por_multiplicador(fila_base, cuero):
     """Precio = precio del primer cuero × multiplicador del cuero (como Wine Deluxe)."""
-    return f'=J{fila_base}*{MULT_CUERO[cuero]}'
+    return f'=J{fila_base}*{MULT_CUERO[cuero]}' if cuero in MULT_CUERO else None
 
 
 def filas_producto_nuevo(nombre, unid_caja, cueros, fila0):
@@ -497,13 +497,14 @@ def filas_producto_nuevo(nombre, unid_caja, cueros, fila0):
     for k, (cuero, costo, precio) in enumerate(cueros):
         r = fila0 + k
         if isinstance(precio, float) and math.isnan(precio):
-            j = formula_precio_por_multiplicador(fila0, cuero) if k > 0 else ''
+            j = (formula_precio_por_multiplicador(fila0, cuero) or '') if k > 0 else ''
         else:
             j = float(precio)
         filas.append([
             nombre if k == 0 else '', cuero, float(costo),
             f'=C{r}*($B$4/$B$5)', formula_default(), float(unid_caja), f'=$B$8/F{r}',
-            f'=D{r}+E{r}+G{r}+$B$9', f'=${MULT_CUERO[cuero][0]}${MULT_CUERO[cuero][1:]}', j,
+            f'=D{r}+E{r}+G{r}+$B$9',
+            f'=${MULT_CUERO[cuero][0]}${MULT_CUERO[cuero][1:]}' if cuero in MULT_CUERO else 1.0, j,
             f'=(J{r}-H{r})/J{r}', f'=ROUND(J{r}*$B$10)', f'=(L{r}-H{r})/L{r}',
             f'=ROUND(J{r}*$B$11)', f'=(N{r}-H{r})/N{r}', f'=ROUND(J{r}*$B$12)', f'=(P{r}-H{r})/P{r}',
             f'=(J{r}-L{r})/J{r}', f'=ROUND(J{r}*$B$13)', f'=ROUND(J{r}*$B$14)', f'=ROUND(J{r}*$B$15)',

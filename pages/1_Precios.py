@@ -529,7 +529,7 @@ def bloque_fabricacion(prod, bom):
                             step=1.0, format='%.0f', key=f'fab_taller_{prod}',
                             help="Gastos del taller (luz, herramienta, cuchillas) sobre el costo. 5% es un supuesto")
     nombres = [n for n, _, _ in mat_actual()
-               if n != P.VALOR_HORA and n not in {P.nombre_cuero(c) for c in P.CUEROS}]
+               if n != P.VALOR_HORA and not n.startswith('Cuero ')]
     clave_base = f'fab_base_{prod}'
     if clave_base not in st.session_state:
         items = bom['items'] or [(n, 0.0) for n in ('Hilo', 'Herraje') if n in nombres]
@@ -611,8 +611,7 @@ def hoja_costos_nuevo(idx, bom, cueros):
     taller = d.number_input("Taller %", value=float(bom['taller']) * 100, min_value=0.0, max_value=100.0,
                             step=1.0, format='%.0f', key=f'{k}_taller',
                             help="Luz, herramienta, cuchillas, sobre el costo. 5% es un supuesto")
-    excluir = {P.VALOR_HORA} | {P.nombre_cuero(c) for c in P.CUEROS}
-    opciones = [n for n in catalogo if n not in excluir]
+    opciones = [n for n in catalogo if n != P.VALOR_HORA and not n.startswith('Cuero ')]
     previos = [cn for cn, _ in bom['items']]
     sel = st.multiselect("Materiales (herrajes, hilo, forro…)", opciones + [x for x in previos if x not in opciones],
                          default=previos or [x for x in ('Hilo', 'Herraje') if x in opciones],
@@ -665,9 +664,14 @@ def dialogo_nuevo(idx=None):
                                   format_func={'prov': 'Lo compro al proveedor', 'fab': 'Lo fabrico yo'}.get,
                                   default='fab' if bom_prev else 'prov', key=f'np_origen_{idx}') \
         or ('fab' if bom_prev else 'prov')
-    cueros = st.pills("Cueros", list(P.MULT_CUERO), selection_mode='multi',
-                      default=list(costos_prev) if previo else ['Vaqueta'], key=f'np_cueros_{idx}') or []
-    cueros = [c for c in P.MULT_CUERO if c in cueros]
+    _def_c = list(costos_prev) if previo else ['Vaqueta']
+    cueros = st.multiselect("Cueros", list(P.MULT_CUERO) + [c for c in _def_c if c not in P.MULT_CUERO],
+                            default=_def_c, accept_new_options=True, key=f'np_cueros_{idx}',
+                            placeholder="Elige o escribe un cuero nuevo",
+                            help="Si el cuero no está en la lista, escribe su nombre y pulsa Enter. "
+                                 "Su precio por dm² lo pones abajo, en la hoja de costos.") or []
+    cueros = list(dict.fromkeys(' '.join(c.split()).removeprefix('Cuero ').strip() for c in cueros if c.strip()))
+    cueros = [c for c in cueros if c]
     costos, bom, mats_nuevos = [], None, None
     if cueros and origen == 'prov':
         st.markdown("<div class='emp-t'>Costo del proveedor por unidad (USD, a la tasa base)</div>",
