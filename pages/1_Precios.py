@@ -23,6 +23,18 @@ st.set_page_config(page_title="MORAES · Precios", page_icon="💲", layout="wid
                    initial_sidebar_state="collapsed")
 
 SHEET_PRECIOS_ID = st.secrets.get('sheet_precios_id') or _PRECIOS_DEFAULT
+
+# Con clave_precios configurada, la página entera pide clave (la vendedora de feria no ve costos)
+_CLAVE_VER = st.secrets.get('clave_precios')
+if _CLAVE_VER and not (st.session_state.get('precios_ok') or st.session_state.get('admin')):
+    with st.form('acceso_precios'):
+        _c = st.text_input("Clave", type='password')
+        if st.form_submit_button("Entrar", type='primary'):
+            if _c == _CLAVE_VER:
+                st.session_state['precios_ok'] = True
+                st.rerun()
+            st.error("Clave incorrecta.")
+    st.stop()
 URL_SHEET = f"https://docs.google.com/spreadsheets/d/{SHEET_PRECIOS_ID}/edit"
 
 # Paleta
