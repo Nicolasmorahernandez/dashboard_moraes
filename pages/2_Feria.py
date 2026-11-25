@@ -54,7 +54,7 @@ st.markdown(f"""
 [data-testid="stLayoutWrapper"] > [data-testid="stVerticalBlock"] {{ background:{CARD}; border-radius:18px;
     box-shadow:0 2px 10px rgba(120,80,40,.06); }}
 .ph {{ background:#f6f1eb; border-radius:12px; overflow:hidden; display:flex; justify-content:center; margin-bottom:.6rem; }}
-.ph img {{ width:100%; height:230px; object-fit:contain; }}
+.ph img {{ width:100%; height:280px; object-fit:contain; mix-blend-mode:multiply; }}
 .ph.grande img {{ height:360px; }}
 .ph.vacia {{ height:230px; align-items:center; font-family:'Fraunces',serif; font-size:3rem; color:{FAINT}; }}
 .pn {{ font-family:'Fraunces',serif; font-size:1.35rem; line-height:1.15; color:{INK}; margin:0; }}
@@ -92,6 +92,8 @@ button[kind="secondary"]:hover {{ border-color:{ACENTO} !important; color:{ACENT
 [data-testid="stSliderTickBar"] * {{ color:{MUTED} !important; }}
 /* Expanders y formularios */
 [data-testid="stExpander"] details {{ background:{CARD}; border:1px solid {LINE} !important; border-radius:14px; }}
+[data-testid="stExpander"] summary {{ background:{CARD} !important; border-radius:14px; }}
+[data-testid="stExpander"] summary:hover {{ background:#f8efe3 !important; }}
 [data-testid="stExpander"] summary, [data-testid="stExpander"] summary * {{ color:{INK} !important; }}
 [data-testid="stExpander"] svg {{ fill:{MUTED}; }}
 [data-testid="stForm"] {{ background:{CARD}; border:1px solid {LINE}; border-radius:18px; }}
