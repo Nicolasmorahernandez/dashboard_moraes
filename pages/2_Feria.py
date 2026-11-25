@@ -5,9 +5,11 @@ stock, sin costos ni márgenes. La vendedora aplica un descuento dentro del tope
 y del margen mínimo que define el dueño, y registra cada venta con "Vendí".
 Todo queda en la hoja MORAES_precios_ok (pestañas Feria y Ventas feria).
 """
+import base64
 import html
 import math
 import re
+from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -28,36 +30,72 @@ ZONA = ZoneInfo(st.secrets.get('zona_horaria', 'America/Bogota'))
 CLAVE_FERIA = st.secrets.get('clave_feria')
 CLAVE_ADMIN = st.secrets.get('clave_precios')
 
-BG, CARD, LINE = '#14100e', '#1d1714', '#30251f'
-INK, MUTED, FAINT = '#f3ebe4', '#a38d7e', '#6f5d52'
-COGNAC, GOLD, GREEN, RED = '#c27c4a', '#d9a441', '#86c58a', '#e07a6e'
+# Paleta propia de la feria: cálida y clara, distinta del dashboard
+BG, CARD, LINE = '#f6eee3', '#fffaf3', '#e6d6c2'
+INK, MUTED, FAINT = '#3a2618', '#8a6a52', '#b39a84'
+ACENTO, MIEL, VERDE, ROJO = '#b4532a', '#c98a3a', '#5f7a35', '#b0442f'
 
 st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap');
-.stApp {{ background:{BG}; color:{INK}; font-family:'Inter',sans-serif; }}
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Sans:wght@400;500;600&display=swap');
+.stApp {{ background:{BG}; color:{INK}; font-family:'DM Sans',sans-serif; }}
 [data-testid="stHeader"] {{ background:transparent; }}
-[data-testid="stSidebarNav"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"], [data-testid="stExpandSidebarButton"], [data-testid="stSidebar"] {{ display:none; }}
-.block-container {{ max-width:560px; padding-top:1.4rem; padding-bottom:4rem; }}
-.eyebrow {{ font-size:.66rem; letter-spacing:.18em; text-transform:uppercase; color:{MUTED}; margin:0; }}
-.titulo {{ font-family:'Cormorant Garamond',serif; font-size:2.2rem; font-weight:600; line-height:1.05; color:{INK}; margin:.1rem 0 .3rem; }}
-.resumen {{ display:flex; gap:1.2rem; font-size:.85rem; color:{MUTED}; margin:.2rem 0 1rem; }}
-.resumen b {{ color:{INK}; font-size:1rem; }}
-[data-testid="stVerticalBlockBorderWrapper"] {{ background:{CARD}; border-color:{LINE} !important; border-radius:14px; }}
-.pn {{ font-family:'Cormorant Garamond',serif; font-size:1.45rem; line-height:1.1; color:{INK}; margin:0; }}
-.pm {{ font-size:.82rem; color:{MUTED}; margin:.2rem 0 0; }}
-.pm b {{ color:{INK}; }}
-.precio {{ font-family:'Cormorant Garamond',serif; font-size:3rem; font-weight:600; color:{INK}; line-height:1; }}
-.tachado {{ font-size:1.1rem; color:{FAINT}; text-decoration:line-through; margin-left:.5rem; }}
-.nota {{ font-size:.78rem; color:{FAINT}; margin:.3rem 0; }}
-.aviso {{ font-size:.85rem; color:{GOLD}; margin:.4rem 0; }}
-.stock-ok {{ color:{GREEN}; }} .stock-bajo {{ color:{GOLD}; }} .stock-no {{ color:{RED}; }}
-.stButton > button {{ min-height:3rem; border-radius:12px; font-size:1rem; }}
-.stButton > button[kind="primary"] {{ background:{COGNAC}; border-color:{COGNAC}; color:#1a0f09; font-weight:600; }}
-.stButton > button[kind="primary"]:disabled {{ opacity:.35; }}
-button[data-testid^="stBaseButton-secondary"] {{ background:transparent; border:1px solid {LINE}; color:{INK}; }}
-[data-testid="stNumberInput"] input, [data-testid="stTextInput"] input {{ font-size:1.05rem; }}
-.vt {{ display:flex; justify-content:space-between; font-size:.85rem; padding:.4rem 0; border-bottom:1px solid {LINE}; }}
+[data-testid="stHeader"] * {{ color:{MUTED} !important; }}
+[data-testid="stSidebarNav"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"],
+[data-testid="stExpandSidebarButton"], [data-testid="stSidebar"] {{ display:none; }}
+.block-container {{ max-width:920px; padding-top:1.2rem; padding-bottom:4rem; }}
+[data-testid="stWidgetLabel"] p {{ color:{INK} !important; font-weight:500; }}
+.eyebrow {{ font-size:.7rem; letter-spacing:.2em; text-transform:uppercase; color:{ACENTO}; margin:0; font-weight:600; }}
+.titulo {{ font-family:'Fraunces',serif; font-size:2.4rem; font-weight:600; line-height:1.05; color:{INK}; margin:.15rem 0 .3rem; }}
+.resumen {{ display:flex; gap:.6rem; margin:.4rem 0 1.1rem; flex-wrap:wrap; }}
+.resumen span {{ background:{CARD}; border:1px solid {LINE}; border-radius:999px; padding:.3rem .8rem; font-size:.85rem; color:{MUTED}; }}
+.resumen b {{ color:{INK}; }}
+[data-testid="stVerticalBlock"] {{ border-color:{LINE} !important; }}
+[data-testid="stLayoutWrapper"] > [data-testid="stVerticalBlock"] {{ background:{CARD}; border-radius:18px;
+    box-shadow:0 2px 10px rgba(120,80,40,.06); }}
+.ph {{ background:#f3ece2; border-radius:12px; overflow:hidden; display:flex; justify-content:center; margin-bottom:.6rem; }}
+.ph img {{ width:100%; height:230px; object-fit:cover; }}
+.ph.grande img {{ height:360px; }}
+.ph.vacia {{ height:230px; align-items:center; font-family:'Fraunces',serif; font-size:3rem; color:{FAINT}; }}
+.pn {{ font-family:'Fraunces',serif; font-size:1.35rem; line-height:1.15; color:{INK}; margin:0; }}
+.pm {{ font-size:.85rem; color:{MUTED}; margin:.25rem 0 .1rem; }}
+.pm b {{ color:{INK}; font-size:1rem; }}
+.precio {{ font-family:'Fraunces',serif; font-size:3.2rem; font-weight:600; color:{INK}; line-height:1; margin:.2rem 0; }}
+.tachado {{ font-family:'DM Sans',sans-serif; font-size:1.1rem; color:{FAINT}; text-decoration:line-through; margin-left:.6rem; font-weight:400; }}
+.ahorro {{ display:inline-block; background:#f4e2d4; color:{ACENTO}; border-radius:999px; padding:.15rem .6rem; font-size:.8rem; font-weight:600; margin-left:.5rem; vertical-align:middle; }}
+.nota {{ font-size:.8rem; color:{MUTED}; margin:.3rem 0; }}
+.aviso {{ font-size:.9rem; color:{INK}; background:#f8e7cf; border:1px solid #ecd0a6; border-radius:12px; padding:.7rem .9rem; margin:.4rem 0 .8rem; }}
+.ok {{ font-size:.95rem; color:#2f4417; background:#e5ecd2; border:1px solid #cfdcae; border-radius:12px; padding:.7rem .9rem; margin:.2rem 0 1rem; }}
+.stock-ok {{ color:{VERDE} !important; font-weight:600; }} .stock-bajo {{ color:{MIEL} !important; font-weight:600; }} .stock-no {{ color:{ROJO} !important; font-weight:600; }}
+/* Botones */
+.stButton > button, .stFormSubmitButton > button {{ min-height:3rem; border-radius:12px; font-size:1rem; }}
+button[kind="primary"], button[kind="primaryFormSubmit"] {{ background:{ACENTO} !important; border-color:{ACENTO} !important; color:#fff !important; font-weight:600; }}
+button[kind="primary"] *, button[kind="primaryFormSubmit"] * {{ color:#fff !important; }}
+button[kind="primary"]:disabled {{ opacity:.35; }}
+button[kind="secondary"] {{ background:{CARD} !important; border:1px solid {LINE} !important; color:{INK} !important; }}
+button[kind="secondary"]:hover {{ border-color:{ACENTO} !important; color:{ACENTO} !important; }}
+/* Cuero / pago (segmentados) */
+[data-testid="stButtonGroup"] button {{ background:{CARD} !important; color:{INK} !important; border-color:{LINE} !important; min-height:2.8rem; }}
+[data-testid="stButtonGroup"] button * {{ color:{INK} !important; }}
+[data-testid="stButtonGroup"] button[aria-checked="true"] {{ background:{ACENTO} !important; border-color:{ACENTO} !important; }}
+[data-testid="stButtonGroup"] button[aria-checked="true"] * {{ color:#fff !important; }}
+/* Campos */
+[data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="input"] input, [data-testid="stNumberInputContainer"] {{
+    background:{CARD} !important; color:{INK} !important; border-color:{LINE} !important; }}
+[data-testid="stTextInputRootElement"] {{ background:{CARD} !important; border-color:{LINE} !important; }}
+.stApp input {{ background:transparent !important; color:{INK} !important; -webkit-text-fill-color:{INK} !important;
+    font-size:1.05rem; opacity:1 !important; }}
+.stApp input::placeholder {{ color:{FAINT} !important; -webkit-text-fill-color:{FAINT} !important; }}
+[data-testid="stNumberInputStepDown"], [data-testid="stNumberInputStepUp"] {{ background:{CARD} !important; color:{INK} !important; }}
+[data-testid="stNumberInputStepDown"] svg, [data-testid="stNumberInputStepUp"] svg {{ fill:{INK} !important; }}
+[data-testid="stSliderThumbValue"] {{ color:{ACENTO} !important; font-weight:600; }}
+[data-testid="stSliderTickBar"] * {{ color:{MUTED} !important; }}
+/* Expanders y formularios */
+[data-testid="stExpander"] details {{ background:{CARD}; border:1px solid {LINE} !important; border-radius:14px; }}
+[data-testid="stExpander"] summary, [data-testid="stExpander"] summary * {{ color:{INK} !important; }}
+[data-testid="stExpander"] svg {{ fill:{MUTED}; }}
+[data-testid="stForm"] {{ background:{CARD}; border:1px solid {LINE}; border-radius:18px; }}
+.vt {{ display:flex; justify-content:space-between; gap:.6rem; font-size:.88rem; padding:.5rem 0; border-bottom:1px dashed {LINE}; }}
 .vt.anulada {{ color:{FAINT}; text-decoration:line-through; }}
 </style>
 """, unsafe_allow_html=True)
@@ -160,7 +198,26 @@ st.markdown(f"<p class='eyebrow'>MORAES · {html.escape(st.session_state['vended
             unsafe_allow_html=True)
 
 if st.session_state.pop('vendido_ok', None):
-    st.success(st.session_state.pop('vendido_txt', 'Venta registrada'))
+    st.markdown(f"<div class='ok'>✓ {html.escape(st.session_state.pop('vendido_txt', 'Venta registrada'))}</div>",
+                unsafe_allow_html=True)
+
+
+CARPETA_FOTOS = Path(__file__).resolve().parent.parent / 'fotos'
+
+
+@st.cache_data(show_spinner=False)
+def _foto_uri(nombre_archivo):
+    ruta = CARPETA_FOTOS / nombre_archivo
+    if not ruta.exists():
+        return None
+    return 'data:image/webp;base64,' + base64.b64encode(ruta.read_bytes()).decode()
+
+
+def foto_html(prod, grande=False):
+    uri = _foto_uri(F.FOTOS[prod]) if prod in F.FOTOS else None
+    if not uri:
+        return f"<div class='ph vacia'>{html.escape(prod[:1])}</div>"
+    return f"<div class='ph{' grande' if grande else ''}'><img src='{uri}' alt='{html.escape(prod)}'></div>"
 
 
 def _ir(prod):
@@ -178,68 +235,72 @@ if not sel:
         st.markdown("<div class='aviso'>Todavía no hay inventario cargado para esta feria. "
                     "Nicolás lo carga en <b>Preparar feria</b>, abajo.</div>", unsafe_allow_html=True)
     buscar = st.text_input("Buscar", placeholder="Buscar producto…", label_visibility='collapsed') if en_feria else ''
-    for prod in en_feria:
-        if buscar and buscar.lower() not in prod.lower():
-            continue
+    visibles = [p for p in en_feria if not buscar or buscar.lower() in p.lower()]
+    cols = st.columns(2, gap='medium')
+    for i, prod in enumerate(visibles):
         cueros = [c for (p, c), q in stock.items() if p == prod and q > 0 and (p, c) in precios]
         ps = [precios[(prod, c)][0] for c in cueros]
         disp = sum(max(disponible(prod, c), 0) for c in cueros)
-        rango = money(min(ps)) if min(ps) == max(ps) else f"{money(min(ps))}–{money(max(ps))}"
+        rango = money(min(ps)) if min(ps) == max(ps) else f"{money(min(ps))} – {money(max(ps))}"
         clase = 'stock-no' if disp <= 0 else 'stock-bajo' if disp <= 2 else 'stock-ok'
-        with st.container(border=True):
-            st.markdown(f"<p class='pn'>{html.escape(prod)}</p>"
-                        f"<p class='pm'><b>{rango}</b> · {', '.join(map(html.escape, cueros))} · "
-                        f"<span class='{clase}'>{disp} disponibles</span></p>", unsafe_allow_html=True)
+        txt_disp = 'Agotado' if disp <= 0 else f"{disp} disponible{'s' if disp != 1 else ''}"
+        with cols[i % 2].container(border=True):
+            st.markdown(f"{foto_html(prod)}<p class='pn'>{html.escape(prod)}</p>"
+                        f"<p class='pm'><b>{rango}</b> · <span class='{clase}'>{txt_disp}</span></p>"
+                        f"<p class='pm'>{' · '.join(map(html.escape, cueros))}</p>", unsafe_allow_html=True)
             st.button("Vender", key=f"v_{prod}", on_click=_ir, args=(prod,), width='stretch',
-                      disabled=disp <= 0)
+                      disabled=disp <= 0, type='primary')
 
 # ── Ficha de venta ────────────────────────────────────────────────
 else:
     st.button("← Productos", on_click=_ir, args=(None,))
     cueros = [c for (p, c), q in stock.items() if p == sel and q > 0 and (p, c) in precios]
-    st.markdown(f"<p class='pn' style='font-size:1.9rem'>{html.escape(sel)}</p>", unsafe_allow_html=True)
-    etiqueta = {c: f"{c} ({max(disponible(sel, c), 0)})" for c in cueros}
-    cuero = st.segmented_control("Cuero", cueros, format_func=etiqueta.get, default=cueros[0] if cueros else None,
-                                 key=f'f_w_cuero') or (cueros[0] if cueros else None)
-    if not cuero:
-        st.stop()
-    precio, costo = precios[(sel, cuero)]
-    disp = disponible(sel, cuero)
-    tope = F.descuento_tope(precio, costo, cfg['desc_max'], cfg['margen_min'])
-    if tope > 0:
-        desc = st.slider(f"Descuento (hasta {tope}%)", 0, tope, 0, step=1, format='%d%%', key='f_w_desc')
-    else:
-        desc = 0
-        st.markdown("<div class='nota'>Este producto no tiene descuento.</div>", unsafe_allow_html=True)
-    final = F.precio_final(precio, desc)
-    st.markdown(f"<div class='precio'>{money(final)}"
-                f"{f'<span class=tachado>{money(precio)}</span>' if desc else ''}</div>",
-                unsafe_allow_html=True)
-    clase = 'stock-no' if disp <= 0 else 'stock-bajo' if disp <= 2 else 'stock-ok'
-    st.markdown(f"<p class='pm'><span class='{clase}'>{max(disp, 0)} disponibles</span> en {html.escape(cuero)}</p>",
-                unsafe_allow_html=True)
-    cant = st.number_input("Cantidad", min_value=1, max_value=max(disp, 1), value=1, step=1, key='f_w_cant')
-    pago = st.segmented_control("Pago", F.PAGOS, default=F.PAGOS[0], key='f_w_pago') or F.PAGOS[0]
-    cliente = st.text_input("Cliente (opcional)", placeholder="Nombre, correo o Instagram", key='f_w_cliente')
-    if cant > 1:
-        st.markdown(f"<div class='nota'>Total: <b>{money(final * cant)}</b></div>", unsafe_allow_html=True)
-    if st.button(f"Vendí · {money(final * cant)}", type='primary', width='stretch', disabled=disp < cant):
-        try:
-            sh = _libro()
-            ws_v = _tab(sh, F.HOJA_VENTAS, crear_con=F.CAB_VENTAS)
-            ahora = datetime.now(ZONA)
-            fila = F.fila_venta(ahora.strftime('%Y-%m-%d'), ahora.strftime('%H:%M'), cfg['feria'], sel, cuero,
-                                cant, precio, desc, final, pago, cliente.strip(), st.session_state['vendedora'])
-            resp = ws_v.append_row(fila, value_input_option='RAW', table_range='A1')
-            m = re.search(r'![A-Z]+(\d+)', (resp or {}).get('updates', {}).get('updatedRange', ''))
-            st.session_state['ultima_venta'] = int(m.group(1)) if m else None
-            cargar_feria()
-            _ir(None)
-            st.session_state['vendido_ok'] = True
-            st.session_state['vendido_txt'] = f"Vendido: {sel} {cuero} × {cant} · {money(final * cant)}"
-            st.rerun()
-        except APIError as e:
-            st.error(f"No se guardó la venta. Revisa la conexión e intenta de nuevo.\n\n`{e}`")
+    izq, der = st.columns([1, 1.15], gap='large')
+    izq.markdown(foto_html(sel, grande=True), unsafe_allow_html=True)
+    with der:
+        st.markdown(f"<p class='pn' style='font-size:2rem'>{html.escape(sel)}</p>", unsafe_allow_html=True)
+        etiqueta = {c: f"{c} ({max(disponible(sel, c), 0)})" for c in cueros}
+        cuero = st.segmented_control("Cuero", cueros, format_func=etiqueta.get, default=cueros[0] if cueros else None,
+                                     key=f'f_w_cuero') or (cueros[0] if cueros else None)
+        if not cuero:
+            st.stop()
+        precio, costo = precios[(sel, cuero)]
+        disp = disponible(sel, cuero)
+        tope = F.descuento_tope(precio, costo, cfg['desc_max'], cfg['margen_min'])
+        if tope > 0:
+            desc = st.slider(f"Descuento (hasta {tope}%)", 0, tope, 0, step=1, format='%d%%', key='f_w_desc')
+        else:
+            desc = 0
+            st.markdown("<div class='nota'>Este producto no tiene descuento.</div>", unsafe_allow_html=True)
+        final = F.precio_final(precio, desc)
+        st.markdown(f"<div class='precio'>{money(final)}"
+                    f"{f'<span class=tachado>{money(precio)}</span><span class=ahorro>−{desc}%</span>' if desc else ''}</div>",
+                    unsafe_allow_html=True)
+        clase = 'stock-no' if disp <= 0 else 'stock-bajo' if disp <= 2 else 'stock-ok'
+        st.markdown(f"<p class='pm'><span class='{clase}'>{max(disp, 0)} disponible{'' if disp == 1 else 's'}</span> en {html.escape(cuero)}</p>",
+                    unsafe_allow_html=True)
+        cant = st.number_input("Cantidad", min_value=1, max_value=max(disp, 1), value=1, step=1, key='f_w_cant')
+        pago = st.segmented_control("Pago", F.PAGOS, default=F.PAGOS[0], key='f_w_pago') or F.PAGOS[0]
+        cliente = st.text_input("Cliente (opcional)", placeholder="Nombre, correo o Instagram", key='f_w_cliente')
+        if cant > 1:
+            st.markdown(f"<div class='nota'>Total: <b>{money(final * cant)}</b></div>", unsafe_allow_html=True)
+        if st.button(f"Vendí · {money(final * cant)}", type='primary', width='stretch', disabled=disp < cant):
+            try:
+                sh = _libro()
+                ws_v = _tab(sh, F.HOJA_VENTAS, crear_con=F.CAB_VENTAS)
+                ahora = datetime.now(ZONA)
+                fila = F.fila_venta(ahora.strftime('%Y-%m-%d'), ahora.strftime('%H:%M'), cfg['feria'], sel, cuero,
+                                    cant, precio, desc, final, pago, cliente.strip(), st.session_state['vendedora'])
+                resp = ws_v.append_row(fila, value_input_option='RAW', table_range='A1')
+                m = re.search(r'![A-Z]+(\d+)', (resp or {}).get('updates', {}).get('updatedRange', ''))
+                st.session_state['ultima_venta'] = int(m.group(1)) if m else None
+                cargar_feria()
+                _ir(None)
+                st.session_state['vendido_ok'] = True
+                st.session_state['vendido_txt'] = f"Vendido: {sel} {cuero} × {cant} · {money(final * cant)}"
+                st.rerun()
+            except APIError as e:
+                st.error(f"No se guardó la venta. Revisa la conexión e intenta de nuevo.\n\n`{e}`")
 
 
 # ── Ventas de hoy ─────────────────────────────────────────────────
@@ -316,7 +377,6 @@ with st.expander("Preparar feria (Nicolás)"):
             ws_f.update(F.grid_feria(nuevo_cfg, nuevo_stock), 'A1', value_input_option='RAW')
             _tab(sh, F.HOJA_VENTAS, crear_con=F.CAB_VENTAS)
             cargar_feria()
-            st.success("Feria guardada.")
             st.rerun()
         except APIError as e:
             st.error(f"No pude guardar: `{e}`")
