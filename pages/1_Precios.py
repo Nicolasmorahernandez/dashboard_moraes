@@ -192,6 +192,9 @@ if 'precios_orig' not in st.session_state:
         cargar()
 
 params_orig, prod_orig = st.session_state['precios_orig']
+if P.col_o('WS 6–24') not in prod_orig.columns:      # sesión abierta antes de los precios por volumen
+    cargar()
+    params_orig, prod_orig = st.session_state['precios_orig']
 pend = st.session_state.setdefault('pend', {})   # {celda: valor nuevo}
 
 
@@ -203,7 +206,13 @@ def _aplicar(params, prod):
             params.loc[params['Celda'] == celda, 'Valor'] = v
         else:
             fila, col = P.celda_a_rc(celda)
-            prod.loc[prod['Fila'] == fila, P.ENTRADAS[P.LETRAS[col]]] = v
+            letra, m_ = P.LETRAS[col], prod['Fila'] == fila
+            if letra in P.NIVEL_POR_LETRA:        # precio fijo por volumen (vacío = sigue el %)
+                prod.loc[m_, P.col_o(P.NIVEL_POR_LETRA[letra])] = math.nan if (v is None or v == 0) else v
+            else:
+                prod.loc[m_, P.ENTRADAS[letra]] = v
+                if letra == 'J':                  # el precio escrito reemplaza la fórmula
+                    prod.loc[m_, '_f_J'] = ''
     return params, prod
 
 
@@ -352,7 +361,10 @@ def _valor_orig(celda):
     fila, col = P.celda_a_rc(celda)
     if celda in set(params_orig['Celda']):
         return params_orig.loc[params_orig['Celda'] == celda, 'Valor'].iloc[0]
-    return prod_orig.loc[prod_orig['Fila'] == fila, P.ENTRADAS[P.LETRAS[col]]].iloc[0]
+    letra = P.LETRAS[col]
+    if letra in P.NIVEL_POR_LETRA:
+        return prod_orig.loc[prod_orig['Fila'] == fila, P.col_o(P.NIVEL_POR_LETRA[letra])].iloc[0]
+    return prod_orig.loc[prod_orig['Fila'] == fila, P.ENTRADAS[letra]].iloc[0]
 
 
 def _on_change(celda):
@@ -363,10 +375,10 @@ def _on_change(celda):
         pend[celda] = v
 
 
-def entrada(celda, label, valor, bloqueada=False, fmt='%.2f', step=0.5, min_value=0.0, ayuda=None):
+def entrada(celda, label, valor, bloqueada=False, fmt='%.2f', step=0.5, min_value=0.0, ayuda=None, placeholder=None):
     st.session_state.setdefault(f'in_{celda}', None if _nan(valor) else float(valor))
     st.number_input(label, key=f'in_{celda}', format=fmt, step=step, min_value=min_value,
-                    disabled=bloqueada, on_change=_on_change, args=(celda,),
+                    disabled=bloqueada, on_change=_on_change, args=(celda,), placeholder=placeholder,
                     help=ayuda or (f"Celda {celda}" + (" · tiene fórmula en el Sheet, se cambia allá" if bloqueada else "")))
 
 
@@ -792,11 +804,26 @@ else:
     with izq:
         st.markdown(f"<div class='panel-t'>Editar · {html.escape(cuero)}</div>", unsafe_allow_html=True)
         bloque_origen(producto_sel, prod_orig[prod_orig['Producto'] == producto_sel], o, fila)
-        entrada(f'J{fila}', 'Precio retail (USD)', o['Precio retail'], bool(o['_f_J']), fmt='%.0f', step=1.0)
+        entrada(f'J{fila}', 'Precio retail (USD)', o['Precio retail'], False, fmt='%.0f', step=1.0,
+                ayuda=f"Celda J{fila}" + (" · tiene fórmula en el Sheet; si lo cambias aquí, la reemplaza por tu número"
+                                          if o['_f_J'] else ""))
         entrada(f'F{fila}', 'Unidades por caja', o['Unid/caja'], bool(o['_f_F']), fmt='%.0f', step=1.0, min_value=1.0)
         if o['_f_J']:
-            st.markdown("<div class='nota'>El precio de este cuero tiene fórmula en el Sheet; se cambia allá.</div>",
+            st.markdown("<div class='nota'>El precio de este cuero sale de una fórmula del Sheet (precio base × "
+                        "multiplicador). Si escribes un precio aquí, al guardar reemplaza la fórmula.</div>",
                         unsafe_allow_html=True)
+        _niv_abierto = any(not _nan(o[P.col_o(n_)]) or f'{l_}{fila}' in pend for n_, (l_, _) in P.NIVELES.items())
+        with st.expander("Precios por volumen (wholesale y corporativo)", expanded=_niv_abierto):
+            st.markdown("<div class='nota'>Por defecto salen del retail con los % de Ajustes. Escribe un precio "
+                        "para fijarlo en este producto y cuero; déjalo vacío para que siga el %.</div>",
+                        unsafe_allow_html=True)
+            _nc = st.columns(2)
+            for _i, (_n, (_l, _c)) in enumerate(P.NIVELES.items()):
+                with _nc[_i % 2]:
+                    entrada(f'{_l}{fila}', _n.replace('WS', 'Wholesale').replace('Corp', 'Corporativo') + ' (USD)',
+                            o[P.col_o(_n)], False, fmt='%.0f', step=1.0,
+                            placeholder=f"{money(r[_n])} (según {p[_c]:.0%})",
+                            ayuda=f"Celda {_l}{fila} · vacío = fórmula ({p[_c]:.0%} del retail)")
         bloque_empaque(producto_sel)
         if fila in desglose_fab:
             _d = desglose_fab[fila]
@@ -902,7 +929,7 @@ else:
 def _escrituras():
     """(celdas para Modelo, {pestaña auxiliar: grid nuevo} solo las que cambian)."""
     _especiales = {'empaque', 'fab', 'materiales', 'nuevo'}
-    datos = [{'range': d['range'], 'values': [[float(v) if v != '' else '' for v in d['values'][0]]]}
+    datos = [{'range': d['range'], 'values': [[v if isinstance(v, str) else float(v) for v in d['values'][0]]]}
              for d in P.payload_escritura([c for c in cambios if not (_especiales & c.keys())])]
     componentes = {k: list(v) for k, v in st.session_state['emp_componentes'].items()}
     for prod, est in pend_emp.items():
@@ -946,6 +973,12 @@ def _conflictos(sh, ws, datos):
         if {'empaque', 'fab', 'materiales', 'nuevo'} & c.keys() or c['bloqueada']:
             continue
         f_, col_ = P.celda_a_rc(c['celda'])
+        if c.get('reemplaza') or c.get('volumen'):
+            _fa = P._get(formulas_ahora, f_, col_)
+            _fa = _fa if P.es_formula(_fa) else ''
+            if _fa != c['f_antes'] or (not _fa and P._distinto(P.a_numero(P._get(valores_ahora, f_, col_)), c['antes'])):
+                out.append(f"{c['celda']} cambió en el Sheet")
+            continue
         if P.es_formula(P._get(formulas_ahora, f_, col_)):
             out.append(f"{c['celda']} ahora tiene fórmula")
         elif P._distinto(P.a_numero(P._get(valores_ahora, f_, col_)), c['antes']):
@@ -976,7 +1009,9 @@ if cambios:
                 return f"{c['que']}: {money(c['antes'], 2)} → {money(c['despues'], 2)} ({c['nota']})"
             if 'fab' in c or 'materiales' in c or 'nuevo' in c:
                 return c['que']
-            return f"{c['que']}: {c['antes']:g} → {c['despues']:g}"
+            if 'volumen' in c:
+                return f"{c['que']}: " + ("vuelve a la fórmula" if _nan(c['despues']) else f"precio fijo {c['despues']:g}")
+            return f"{c['que']}: {c['antes']:g} → {c['despues']:g}" + (" (reemplaza la fórmula)" if c.get('reemplaza') else "")
         detalle = ' · '.join(_fmt(c) for c in cambios[:3])
         st.markdown(f"<span class='pend'>● {len(cambios)} cambio(s) sin guardar</span>"
                     f"<div class='nota'>{html.escape(detalle)}{' …' if len(cambios) > 3 else ''}</div>",

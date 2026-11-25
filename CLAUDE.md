@@ -21,7 +21,7 @@ Python / Streamlit / Plotly / gspread / pandas. Sin base de datos: la fuente de 
 
 1. **"flujo de cajas"** (`SHEET_FINANZAS_ID`): pestañas Gastos Operativos, Ventas, Márgenes, Inventario. Las cabeceras reales empiezan en filas distintas (`head=2..4` según pestaña) y hay filas de totales/leyendas que se filtran a mano.
 2. **Sheet Amazon** (`SHEET_AMAZON_ID`): Ventas Amazon y Gastos Amazon (fees, montos negativos).
-3. **"MORAES_precios_ok"** (`SHEET_PRECIOS_ID`, override `sheet_precios_id`): parámetros en B4:B16/E5:E15, productos desde fila 19. La app solo escribe celdas de entrada (C, E, F, J y parámetros) que no tengan fórmula; los cálculos los hace el Sheet. Chequea conflictos antes de escribir. Secret opcional `clave_precios` protege el guardado.
+3. **"MORAES_precios_ok"** (`SHEET_PRECIOS_ID`, override `sheet_precios_id`): parámetros en B4:B16/E5:E15, productos desde fila 19. La app solo escribe celdas de entrada (C, E, F, J y parámetros) que no tengan fórmula; los cálculos los hace el Sheet. Chequea conflictos antes de escribir. Excepción deliberada: el precio retail (J) y los precios por volumen (L,N,P,S,T,U,V) se pueden fijar a mano por producto/cuero; el número reemplaza la fórmula del Sheet y, al dejar un precio por volumen vacío, se restaura `=ROUND(J×%)`. Secret opcional `clave_precios` protege el guardado.
 
 ## Decisiones clave
 
