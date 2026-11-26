@@ -29,6 +29,7 @@ CSS = f"""
 .pn {{ font-family:'Fraunces',serif; font-size:1.35rem; line-height:1.15; color:{INK}; margin:0; }}
 .pm {{ font-size:.85rem; color:{MUTED}; margin:.25rem 0 .1rem; }}
 .pm b {{ color:{INK}; font-size:1rem; }}
+.pmin {{ font-size:.8rem; color:{FAINT}; margin:0 0 .1rem; }}
 .precio {{ font-family:'Fraunces',serif; font-size:3.2rem; font-weight:600; color:{INK}; line-height:1; margin:.2rem 0; }}
 .tachado {{ font-family:'DM Sans',sans-serif; font-size:1.1rem; color:{FAINT}; text-decoration:line-through; margin-left:.6rem; font-weight:400; }}
 .ahorro {{ display:inline-block; background:#f4e2d4; color:{ACENTO}; border-radius:999px; padding:.15rem .6rem; font-size:.8rem; font-weight:600; margin-left:.5rem; vertical-align:middle; }}

@@ -182,11 +182,18 @@ if not sel:
         ps = [precios[(prod, c)][0] for c in cueros]
         disp = sum(max(disponible(prod, c), 0) for c in cueros)
         rango = money(min(ps)) if min(ps) == max(ps) else f"{money(min(ps))} – {money(max(ps))}"
+        # Precio mínimo que puede ofrecer (respeta el descuento máximo y el margen mínimo)
+        minimos = [F.precio_final(precios[(prod, c)][0],
+                                  F.descuento_tope(*precios[(prod, c)], cfg['desc_max'], cfg['margen_min']))
+                   for c in cueros]
+        txt_min = '' if minimos == ps else (
+            money(min(minimos)) if min(minimos) == max(minimos) else f"{money(min(minimos))} – {money(max(minimos))}")
         clase = 'stock-no' if disp <= 0 else 'stock-bajo' if disp <= 2 else 'stock-ok'
         txt_disp = 'Agotado' if disp <= 0 else f"{disp} disponible{'s' if disp != 1 else ''}"
         with cols[i % 2].container(border=True):
             st.markdown(f"{foto_html(prod)}<p class='pn'>{html.escape(prod)}</p>"
                         f"<p class='pm'><b>{rango}</b> · <span class='{clase}'>{txt_disp}</span></p>"
+                        + (f"<p class='pmin'>Mínimo {txt_min}</p>" if txt_min else '') +
                         f"<p class='pm'>{' · '.join(map(html.escape, cueros))}</p>", unsafe_allow_html=True)
             st.button("Vender", key=f"v_{prod}", on_click=_ir, args=(prod,), width='stretch',
                       disabled=disp <= 0, type='primary')
